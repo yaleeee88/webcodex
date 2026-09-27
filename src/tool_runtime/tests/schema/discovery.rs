@@ -1094,6 +1094,7 @@ async fn tool_manifest_without_intent_keeps_compat_shape_and_lists_available_int
         available,
         vec![
             "coding".to_string(),
+            "goal".to_string(),
             "audit".to_string(),
             "exploration".to_string(),
             "file_transfer".to_string(),
@@ -1113,6 +1114,7 @@ async fn tool_manifest_all_available_intents_parse_and_filter_through_tool_call(
     let runtime = test_runtime();
     for intent in [
         "coding",
+        "goal",
         "audit",
         "exploration",
         "file_transfer",

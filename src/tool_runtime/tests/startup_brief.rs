@@ -267,19 +267,18 @@ fn assert_builtin_workflow(output: &Value) {
         .as_str()
         .unwrap();
     for phrase in [
-        "work_on_project.goal_context",
-        "get_goal/present_goal_plan",
-        "choose explicitly among multiple candidates",
-        "never infer from Project/Window/title/recency",
-        "ordinary new substantial multi-step/cross-turn",
-        "prepare_goal_workflow",
-        "exact current Workflow Session",
-        "completion_conditions",
-        "optional explicit controller Agent",
-        "Host continuation setup/readiness remains separate",
-        "Low-level create_goal and associate_goal_workflow_session remain available",
-        "Tiny one-step",
-        "independently of AGENTS.md",
+        "work_on_project then start_goal",
+        "returned session_id",
+        "never ask for internal IDs",
+        "present_agent_continuation",
+        "exact Agent/Endpoint/generation",
+        "gateway alone cannot mount the card",
+        "unique active Goal for that Agent",
+        "production_auto_resume_available=true",
+        "checkpoint verified progress",
+        "exact authorized Session",
+        "never infer by Project/Window/title/recency",
+        "Tiny reads skip Goal",
     ] {
         assert!(goal_workflow.contains(phrase), "{phrase}");
     }
