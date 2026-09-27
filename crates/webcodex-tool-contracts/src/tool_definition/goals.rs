@@ -50,7 +50,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     false,
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
-                "Create a substantial browser Goal from a natural-language request. After work_on_project, use its returned session_id and infer a bounded plan and stable key; never request internal IDs. Prefer direct start_goal. Via gateway, call call_runtime_tool(tool=start_goal), then direct present_agent_continuation with the exact returned Agent/Endpoint/generation and goal_id when supported. The gateway does not mount the card. Verify production_auto_resume_available before promising auto-resume; continue and checkpoint real work, and report a missing card or readiness.",
+                "Create a substantial browser Goal from a natural-language request using the exact authorized Workflow Session; infer a bounded plan and stable key, and never request internal IDs. Prefer direct start_goal. Via gateway, call call_runtime_tool(tool=start_goal), then direct present_agent_continuation with the exact returned Agent/Endpoint/generation and goal_id when supported. The gateway does not mount the card. Verify production_auto_resume_available before promising auto-resume; continue and checkpoint real work, and report a missing card or readiness.",
             )
             .with_gpt_action_unsupported(),
             12,

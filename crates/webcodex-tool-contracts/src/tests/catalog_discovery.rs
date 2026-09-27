@@ -216,16 +216,16 @@ fn single_window_goal_workflow_prefers_browser_goal_shortcut_and_keeps_host_neut
     let guidance = format!("{}\n{}", flow.summary, flow.manifest_purpose).to_lowercase();
     for phrase in [
         "start_goal after work_on_project",
-        "never ask for internal IDs",
+        "never ask for internal ids",
         "call call_runtime_tool(tool=start_goal)",
         "direct present_agent_continuation",
-        "exact returned Agent/Endpoint/generation",
+        "exact returned agent/endpoint/generation",
         "gateway alone cannot mount the card",
         "verify production_auto_resume_available=true",
         "checkpoint verified progress",
-        "exactly correlated Goal",
+        "exactly correlated goal",
         "explicitly choose among multiple candidates",
-        "never infer by Project/Window/title/recency",
+        "never infer by project/window/title/recency",
         "prepare_goal_workflow",
         "neither provides browser continuation",
     ] {
