@@ -42,6 +42,14 @@ Desktop 负责准备本机项目和管理连接；你在 ChatGPT 等 AI 客户�
 
 切换项目无需先手工停止 Runtime，也无需断开 OpenAI Secure Tunnel。Desktop 会把所选项目的精确根目录加入 Runner policy，在兼容 Runner 上热激活并持久化当前选择，同时保留现有 Service 和 Tunnel；只有旧版或不兼容 Runner 才可能刷新 Desktop 自己管理的 Runner。不要通过扩大允许目录来解决项目加载失败。
 
+## 用自然语言创建 Goal
+
+在 ChatGPT 中选择 WebCodex tunnel，直接说明项目和要完成的工作，例如：“在我已注册的‘计算机博弈大赛-天元弈枢’项目里创建 Goal：先梳理现状，再完成第一阶段实现；每个阶段保存进度，并在浏览器保持打开时自动续跑，直到任务完成。”
+
+模型会自行建立项目工作会话，再调用 `start_goal` 创建 Goal 和浏览器续跑卡片。用户无需查找或填写 `wc_sess_*`、`wc_goal_*` 或 Agent ID。卡片显示 Goal 进度和续跑连接状态；完成阶段后模型应记录 checkpoint，最终验证并明确将 Goal 标记为完成。
+
+创建成功时卡片最初可能显示“等待浏览器连接”。这表示 Goal 已建立，续跑连接还在建立中；等当前回答结束且卡片完成连接后，才具备浏览器续跑条件。保持该 ChatGPT 页面和 WebCodex tunnel 打开。浏览器关闭、连接断开或 ChatGPT 未派发后续消息时，Goal 会保留，但自动续跑会暂停，恢复连接后可继续。
+
 ## 连接与故障恢复
 
 连接页靠前位置始终显示 **Tunnel 连接配置**。普通 Tunnel 运行中或停止后均可编辑 ID 与只写 API key。保存后，仅替换本应用正在管理的普通 Tunnel，Server 和 Runner 保持运行；原先停止的 Tunnel 不会因保存而自动启动。API key 留空保留已保存密钥，密钥不会回传到界面。

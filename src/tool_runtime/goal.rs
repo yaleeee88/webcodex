@@ -10,6 +10,7 @@ use crate::db::{
 };
 use serde::Serialize;
 use serde_json::{json, to_value};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeSet, HashMap};
 
 const DEFAULT_GOAL_LIST_LIMIT: usize = 50;
@@ -507,6 +508,93 @@ fn request_visibility_budget_available(
 }
 
 impl ToolRuntime {
+    pub(crate) async fn start_goal(
+        &self,
+        auth: Option<&AuthContext>,
+        session_id: String,
+        mut input: NewGoal,
+    ) -> ToolResult {
+        // Validate the exact Session before creating any auxiliary durable state.
+        if let Err(result) = self
+            .authorize_session_target(&session_id, "start_goal", auth)
+            .await
+        {
+            return result;
+        }
+
+        // Stable, bounded keys make a retry converge on the same Agent, Endpoint,
+        // and Goal even if a response is lost between the three durable writes.
+        let digest = Sha256::digest(input.idempotency_key.as_bytes());
+        let suffix = format!("{digest:x}");
+        let agent_key = format!("goal-agent-{}", &suffix[..32]);
+        let endpoint_key = format!("goal-endpoint-{}", &suffix[..32]);
+        let agent = self.create_agent_identity(
+            auth,
+            format!("goal-{}", &suffix[..16]),
+            "Goal continuation".to_string(),
+            Some("Browser-open Goal continuation controller".to_string()),
+            vec!["goal".to_string()],
+            agent_key,
+        );
+        if !agent.success {
+            return agent;
+        }
+        let Some(agent_id) = agent.output["agent"]["agent_id"].as_str() else {
+            return ToolResult::err("Goal controller creation returned no Agent ID");
+        };
+        let agent_id = agent_id.to_string();
+        let endpoint = self.attach_agent_endpoint(
+            auth,
+            agent_id.clone(),
+            "ChatGPT".to_string(),
+            None,
+            endpoint_key,
+        );
+        if !endpoint.success {
+            return endpoint;
+        }
+        let Some(endpoint_id) = endpoint.output["endpoint"]["endpoint_id"].as_str() else {
+            return ToolResult::err("Goal continuation setup returned no Endpoint ID");
+        };
+        let endpoint_id = endpoint_id.to_string();
+        let Some(generation) = endpoint.output["endpoint"]["controller_generation"].as_i64() else {
+            return ToolResult::err("Goal continuation setup returned no controller generation");
+        };
+
+        input.controller_agent_id = Some(agent_id.clone());
+        let goal = self.prepare_goal_workflow(auth, session_id, input).await;
+        if !goal.success {
+            return goal;
+        }
+        let Some(goal_id) = goal.output["goal"]["summary"]["goal_id"].as_str() else {
+            return ToolResult::err("Goal admission returned no Goal ID");
+        };
+        let goal_id = goal_id.to_string();
+        let continuation =
+            self.present_agent_continuation(auth, agent_id.clone(), endpoint_id, generation);
+        if !continuation.success {
+            return ToolResult::err_with_output(
+                "Goal was created, but its browser continuation card could not be prepared; retry start_goal with the same idempotency_key",
+                json!({"goal_id": goal_id, "agent_id": agent_id, "continuation_error": continuation.error}),
+            );
+        }
+        let continuation_ready = continuation.output["agent_continuation"]["host_binding"]
+            ["production_auto_resume_available"]
+            .as_bool()
+            .unwrap_or(false);
+        ToolResult::ok(json!({
+            "goal_id": goal_id,
+            "agent_id": agent_id,
+            "goal": goal.output["goal"],
+            "created": goal.output["created"],
+            "replayed": goal.output["replayed"],
+            "state_changed": goal.output["state_changed"],
+            "agent_continuation": continuation.output["agent_continuation"],
+            "continuation_state": if continuation_ready { "ready" } else { "awaiting_browser_binding" },
+            "next_action": "Do not stop at Goal creation. If this call used the gateway, present the returned exact Agent/Endpoint/generation and goal_id with the direct present_agent_continuation App tool; present_goal_plan is not a continuation carrier. Continue the requested Goal work now and checkpoint verified progress at recovery boundaries. Before asking the user to wait or relying on auto-resume, verify production_auto_resume_available=true; otherwise repair this exact continuation or report the precise blocker. Keep the browser open and end the turn only after real progress so the bound card can resume after a stall.",
+        }))
+    }
+
     pub(crate) async fn prepare_goal_workflow(
         &self,
         auth: Option<&AuthContext>,

@@ -22,6 +22,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
 .activity-attention_needed { border-style: dashed; color: CanvasText; }
 .continuity { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 6px 14px; padding: 7px 9px; border: 1px solid color-mix(in srgb, CanvasText 16%, transparent); border-radius: 7px; font-size: 12px; color: color-mix(in srgb, CanvasText 76%, transparent); }
 .continuity b { color: CanvasText; font-weight: 600; }
+.continuity-hint { padding: 7px 9px; border-left: 3px solid color-mix(in srgb, CanvasText 35%, transparent); border-radius: 4px; background: color-mix(in srgb, CanvasText 5%, Canvas); font-size: 12px; }
 [hidden] { display: none !important; }
 </style>
 </head>
@@ -47,6 +48,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     <span>Fresh turn <b id="fresh-turn">—</b></span>
     <span>Last resume <b id="last-resume">—</b></span>
   </div>
+  <div id="continuity-hint" class="continuity-hint" hidden aria-live="polite"></div>
   <div id="status" class="status">Initializing…</div>
 </main>
 <script>
@@ -268,7 +270,20 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
 
   function extractPlan(result) {
     const callResult = callToolResultOf(result);
-    const structured = callResult && (callResult.structuredContent || callResult.structured_content || callResult);
+    // Some Hosts omit structuredContent for View-originated calls. The Server
+    // duplicates this bounded App-only result in standard text content.
+    let standard = null;
+    for (const block of Array.isArray(callResult?.content) ? callResult.content : []) {
+      if (block?.type !== "text" || typeof block.text !== "string") continue;
+      try {
+        const parsed = JSON.parse(block.text);
+        if (parsed && typeof parsed.success === "boolean" && Object.prototype.hasOwnProperty.call(parsed, "output")) {
+          standard = parsed;
+          break;
+        }
+      } catch (_) {}
+    }
+    const structured = standard || (callResult && (callResult.structuredContent || callResult.structured_content || callResult));
     const output = structured && (structured.output || structured);
     if (!callResult || callResult.isError || !structured || structured.success === false) return null;
     return validPlan(output && output.goal_plan);
@@ -343,6 +358,24 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     }[value] || "Not applicable";
   }
 
+  function continuityGuidance(value) {
+    if (value.wake_state === "delivery_unknown" || value.host_delivery === "unknown" || value.state === "host_unknown") {
+      return "The browser did not confirm this continuation. WebCodex will not resend it automatically because the turn may already have started. Check the conversation before continuing.";
+    }
+    if (value.state === "not_configured") return "This Goal has no browser continuation Agent.";
+    if (value.state === "not_applicable") return "This Goal has ended.";
+    if (!value.available) return "Automatic resume cannot be checked because current activity could not be verified.";
+    if (!value.production_auto_resume_available) return "Automatic resume is not ready. Keep this ChatGPT page open; refresh it if the connection does not recover.";
+    if (value.fresh_turn === "confirmed" && value.state === "resume_confirmed") {
+      return "ChatGPT resumed this Goal. Progress will refresh here.";
+    }
+    if (["pending", "claimed", "prepared", "delivered"].includes(value.wake_state)) {
+      return "A continuation is queued. Waiting for ChatGPT to start a fresh turn.";
+    }
+    if (value.state === "stalled") return "This Goal has been quiet. The browser card is checking whether a safe continuation is due.";
+    return "Automatic resume is ready. Keep this ChatGPT page open.";
+  }
+
   function renderContinuity(continuity) {
     el("continuity").hidden = false;
     el("auto-resume").textContent = continuity.state === "not_configured" ? "Not configured"
@@ -360,6 +393,8 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
       const date = new Date(resumedAt);
       el("last-resume").textContent = Number.isNaN(date.getTime()) ? "Confirmed" : `Confirmed · ${date.toLocaleString()}`;
     }
+    el("continuity-hint").textContent = continuityGuidance(continuity);
+    el("continuity-hint").hidden = false;
   }
 
   function render(plan) {
@@ -521,7 +556,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
   addEventListener("pagehide", teardown, { once: true });
   addEventListener("beforeunload", teardown, { once: true });
 
-  send("ui/initialize", { protocolVersion: APP_PROTOCOL, appInfo: { name: "webcodex-goal-plan-app", title: "WebCodex Goal Plan", version: "6.0.0" }, appCapabilities: {} })
+  send("ui/initialize", { protocolVersion: APP_PROTOCOL, appInfo: { name: "webcodex-goal-plan-app", title: "WebCodex Goal Plan", version: "8.0.0" }, appCapabilities: {} })
     .then(() => {
       if (tornDown) return;
       hostInitialized = true;

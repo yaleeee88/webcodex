@@ -5,7 +5,7 @@ import { webcrypto } from "node:crypto";
 export const flush = () => new Promise(resolve => setImmediate(resolve));
 
 // Execute the shipped App script with deterministic Host messages and timers.
-export function app(filename, { deliverToolMeta = true, deliverToolStructuredContent = true, crypto = webcrypto } = {}) {
+export function app(filename, { deliverToolMeta = true, deliverToolStructuredContent = true, crypto = webcrypto, openai = null } = {}) {
   const html = readFileSync(new URL(`../${filename}`, import.meta.url), "utf8");
   const script = html.match(/<script>([\s\S]*?)<\/script>/)[1];
   const nodes = {};
@@ -48,7 +48,7 @@ export function app(filename, { deliverToolMeta = true, deliverToolStructuredCon
     return id;
   }
   runInNewContext(script, {
-    document, parent, addEventListener, TextEncoder, crypto, btoa, Date: HostDate,
+    document, parent, window: { openai }, addEventListener, TextEncoder, crypto, btoa, Date: HostDate,
     setTimeout: setTimer,
     clearTimeout: id => timers.delete(id),
     setInterval: (callback, delay) => setTimer(callback, delay, true),
@@ -83,11 +83,11 @@ export function app(filename, { deliverToolMeta = true, deliverToolStructuredCon
       deliver({ id: request.id, error });
       await flush();
     },
-    async initialize(outcome = "success") {
+    async initialize(outcome = "success", hostCapabilities = { message: {} }) {
       if (outcome === "timeout") await this.fireTimers(10000);
       else {
         deliver({ id: sent[0].id, ...(outcome === "success"
-          ? { result: { protocolVersion: "2026-01-26" } }
+          ? { result: { protocolVersion: "2026-01-26", ...(hostCapabilities === undefined ? {} : { hostCapabilities }) } }
           : { error: { message: "Host initialization rejected" } }) });
         await flush();
       }

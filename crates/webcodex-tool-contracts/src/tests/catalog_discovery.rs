@@ -183,7 +183,8 @@ fn agent_continuation_setup_flow_is_focused_and_keeps_resume_tools_separate() {
 }
 
 #[test]
-fn single_window_goal_workflow_prefers_atomic_admission_and_keeps_host_setup_separate() {
+fn single_window_goal_workflow_prefers_browser_goal_shortcut_and_keeps_host_neutral_admission_separate(
+) {
     let flow = TOOL_RECOMMENDED_FLOWS
         .iter()
         .find(|flow| flow.name == "single_window_goal_workflow")
@@ -193,6 +194,8 @@ fn single_window_goal_workflow_prefers_atomic_admission_and_keeps_host_setup_sep
         &[
             "work_on_project",
             "get_goal",
+            "start_goal",
+            "present_agent_continuation",
             "prepare_goal_workflow",
             "present_goal_plan",
             "checkpoint_goal",
@@ -200,15 +203,14 @@ fn single_window_goal_workflow_prefers_atomic_admission_and_keeps_host_setup_sep
             "update_goal",
         ]
     );
-    for host_setup in [
+    for low_level_setup in [
         "create_agent_identity",
         "rotate_agent_continuation_endpoint",
-        "present_agent_continuation",
         "list_agent_identities",
     ] {
         assert!(
-            !flow.tools.contains(&host_setup),
-            "ordinary Goal flow duplicated Host continuation setup: {host_setup}"
+            !flow.tools.contains(&low_level_setup),
+            "browser Goal shortcut duplicated low-level setup: {low_level_setup}"
         );
     }
     let guidance = format!("{}\n{}", flow.summary, flow.manifest_purpose).to_lowercase();
@@ -219,9 +221,16 @@ fn single_window_goal_workflow_prefers_atomic_admission_and_keeps_host_setup_sep
         "explicitly choose one before present_goal_plan",
         "get_goal",
         "prepare_goal_workflow",
+        "start_goal",
+        "call_runtime_tool(tool=start_goal",
+        "goal_id returned by start_goal",
+        "gateway result alone cannot mount the continuation app",
+        "do not substitute present_goal_plan",
+        "present_goal_plan: it displays goal state but does not keep the agent endpoint alive",
+        "do not finish with only a creation receipt",
+        "verify production_auto_resume_available=true",
+        "repair the exact continuation setup",
         "durable admission only",
-        "host carrier setup/readiness remains separate",
-        "agent_continuation_setup",
         "low-level create_goal and associate_goal_workflow_session remain available",
     ] {
         assert!(
@@ -232,6 +241,14 @@ fn single_window_goal_workflow_prefers_atomic_admission_and_keeps_host_setup_sep
 
     let categories = registered_tool_categories();
     let goal_tools = categories["goal"].as_array().unwrap();
+    for natural_language_entry in ["start_goal"] {
+        assert!(
+            goal_tools
+                .iter()
+                .any(|tool| tool.as_str() == Some(natural_language_entry)),
+            "Goal discovery lost high-level entry {natural_language_entry}"
+        );
+    }
     for low_level_or_composed in [
         "prepare_goal_workflow",
         "create_goal",
@@ -242,6 +259,12 @@ fn single_window_goal_workflow_prefers_atomic_admission_and_keeps_host_setup_sep
                 .iter()
                 .any(|tool| tool.as_str() == Some(low_level_or_composed)),
             "Goal discovery lost {low_level_or_composed}"
+        );
+    }
+    for natural_language_entry in ["start_goal", "present_agent_continuation"] {
+        assert!(
+            CODING_INTENT_TOOL_NAMES.contains(&natural_language_entry),
+            "default coding intent omitted browser-open Goal entry {natural_language_entry}"
         );
     }
 }
@@ -747,6 +770,7 @@ fn tool_manifest_intents_reference_only_known_model_visible_tools() {
 
     let expected = [
         "coding",
+        "goal",
         "audit",
         "exploration",
         "file_transfer",
@@ -850,6 +874,22 @@ fn coding_intent_has_independent_ordered_canonical_selection_surface() {
     assert_eq!(coding.tools, CODING_INTENT_TOOL_NAMES);
     assert_eq!(coding.tools.first().copied(), Some("work_on_project"));
     assert_eq!(coding.tools.last().copied(), Some("finish_coding_task"));
+
+    let goal = TOOL_MANIFEST_INTENTS
+        .iter()
+        .find(|intent| intent.name == "goal")
+        .expect("goal intent");
+    assert_eq!(goal.tools, GOAL_INTENT_TOOL_NAMES);
+    for required in [
+        "work_on_project",
+        "start_goal",
+        "present_agent_continuation",
+        "list_agent_identities",
+        "checkpoint_goal",
+        "update_goal",
+    ] {
+        assert!(goal.tools.contains(&required), "Goal intent omitted {required}");
+    }
 
     let mut seen = BTreeSet::new();
     for tool in CODING_INTENT_TOOL_NAMES {

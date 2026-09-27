@@ -75,6 +75,10 @@ pub fn work_result_app_tool_specs() -> Vec<ToolSpec> {
 pub fn agent_continuation_app_tool_specs() -> Vec<ToolSpec> {
     vec![
         tool_spec(
+            "agent_goal_sync",
+            "App-only exact Goal synchronization from the Goal's browser continuation card. It uses the same Server-owned stall detector, Session/Window/Project authority checks and Wake fences as goal_plan_sync; the resource association keeps this call available to the continuation View.",
+        ),
+        tool_spec(
             "agent_wait_state",
             "App-only exact read of one caller-owned durable AgentWait. SQLite is authoritative; this polling call creates no Wake, changes no Wait lifecycle, grants no source authority, and must not count as meaningful Window activity.",
         ),

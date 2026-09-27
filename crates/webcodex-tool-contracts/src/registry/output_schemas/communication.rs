@@ -374,6 +374,15 @@ pub fn output_schema_for_tool(name: &str) -> Option<Value> {
         "present_agent_continuation" => wrapped_output_schema(vec![(
             "agent_continuation",
             agent_continuation_projection_schema(),
+        ), (
+            "goal_id",
+            json!({
+                "anyOf": [
+                    {"type": "string", "pattern": "^wc_goal_[A-Za-z0-9_-]{16}$"},
+                    {"type": "null"}
+                ],
+                "description": "Exact Goal associated with the continuation card, or null when this is a general Agent card."
+            }),
         )]),
         "agent_continuation_recover_endpoint" => wrapped_output_schema(vec![
             ("agent_continuation", json!({

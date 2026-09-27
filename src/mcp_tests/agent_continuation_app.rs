@@ -1,7 +1,8 @@
 use super::*;
 use std::sync::Arc;
 
-const APP_TOOLS: [&str; 8] = [
+const APP_TOOLS: [&str; 9] = [
+    "agent_goal_sync",
     "agent_continuation_bind",
     "agent_continuation_recover_endpoint",
     "agent_continuation_state",
@@ -236,7 +237,7 @@ fn post_message(
 async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed() {
     assert_eq!(
         MCP_AGENT_CONTINUATION_UI_RESOURCE_URI,
-        "ui://webcodex/agent-continuation/v17"
+        "ui://webcodex/agent-continuation/v20"
     );
     let (_temp, _db, adaptive) = continuation_runtime();
     let auth = continuation_auth("continuation-surface");
@@ -279,7 +280,8 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
         })
         .map(|tool| tool["name"].as_str().unwrap())
         .collect();
-    assert_eq!(bound_tools.len(), APP_TOOLS.len() + 2);
+    assert_eq!(bound_tools.len(), APP_TOOLS.len() + 3);
+    assert!(bound_tools.contains(&"start_goal"));
     assert!(bound_tools.contains(&"present_agent_continuation"));
     assert!(bound_tools.contains(&"wait_for_agent_events"));
     for name in APP_TOOLS {
@@ -441,6 +443,9 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
                     | "ui://webcodex/agent-continuation/v14"
                     | "ui://webcodex/agent-continuation/v15"
                     | "ui://webcodex/agent-continuation/v16"
+                    | "ui://webcodex/agent-continuation/v17"
+                    | "ui://webcodex/agent-continuation/v18"
+                    | "ui://webcodex/agent-continuation/v19"
             )
         )));
     for uri in [
@@ -461,6 +466,9 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
         "ui://webcodex/agent-continuation/v14",
         "ui://webcodex/agent-continuation/v15",
         "ui://webcodex/agent-continuation/v16",
+        "ui://webcodex/agent-continuation/v17",
+        "ui://webcodex/agent-continuation/v18",
+        "ui://webcodex/agent-continuation/v19",
     ] {
         let read = handle_with_server_apps_enabled(
             &adaptive,
@@ -592,11 +600,11 @@ async fn agent_continuation_app_surface_is_sparse_app_only_and_resource_backed()
     assert!(
         MCP_AGENT_CONTINUATION_APP_HTML
             .contains("for (let hop = 0; hop < MAX_ENDPOINT_SUCCESSOR_HOPS; hop++)"),
-        "v17 successor recovery must remain explicitly bounded"
+        "successor recovery must remain explicitly bounded"
     );
     assert!(
-        MCP_AGENT_CONTINUATION_APP_HTML.contains("version: \"17.0.0\""),
-        "App protocol version must advance with the v17 resource"
+        MCP_AGENT_CONTINUATION_APP_HTML.contains("version: \"21.0.0\""),
+        "App protocol version must advance with the v20 resource"
     );
     assert!(
         MCP_AGENT_CONTINUATION_APP_HTML.contains("const DEBUG_DIAGNOSTICS = false;"),
@@ -1077,7 +1085,11 @@ fn task_origin_wake_survives_published_bootstrap_output_schema() {
 async fn agent_continuation_app_protocol_uses_standard_result_without_model_projection_leaks() {
     let binding_id = "wc_host_binding_qqqqqqqqqqqqqqqqqqqqqg".to_string();
     let (_temp, _db, runtime) = continuation_runtime();
-    let owner = continuation_auth("continuation-owner");
+    let mut owner = continuation_auth("continuation-owner");
+    owner.scopes.extend([
+        crate::auth::scopes::SCOPE_SESSION_COLLABORATE.to_string(),
+        crate::auth::SCOPE_PROJECT_READ.to_string(),
+    ]);
     let foreign = continuation_auth("continuation-foreign");
     let sender = create_agent(
         &runtime,
@@ -1108,6 +1120,15 @@ async fn agent_continuation_app_protocol_uses_standard_result_without_model_proj
         &receiver,
         "continuation-conversation",
     );
+    let goal = runtime.create_goal_with_controller(
+        Some(&owner),
+        "Continuation card Goal".to_string(),
+        "Track this exact Goal from the browser continuation card.".to_string(),
+        Some(receiver.clone()),
+        "continuation-card-goal".to_string(),
+    );
+    assert!(goal.success, "{:?}", goal.output);
+    let goal_id = goal.output["goal"]["summary"]["goal_id"].as_str().unwrap();
 
     let present = handle_with_server_apps_enabled(
         &runtime,
@@ -1134,6 +1155,35 @@ async fn agent_continuation_app_protocol_uses_standard_result_without_model_proj
     assert_eq!(
         present["result"]["structuredContent"]["output"]["agent_continuation"]["display_name"],
         "Receiver"
+    );
+    assert_eq!(
+        present["result"]["structuredContent"]["output"]["goal_id"],
+        goal_id
+    );
+    let goal_sync = handle_with_server_apps_enabled(
+        &runtime,
+        rpc(
+            "tools/call",
+            Some(json!(5209)),
+            mcp_2026_ui_params(json!({
+                "name": "agent_goal_sync",
+                "arguments": {
+                    "goal_id": goal_id,
+                    "app_call_id": "wc_app_call_0123456789abcdef_9"
+                }
+            })),
+        ),
+        Some(&owner),
+        true,
+    )
+    .await;
+    let McpOutcome::Ok(goal_sync) = goal_sync else {
+        panic!("Agent continuation card Goal sync failed: {goal_sync:?}")
+    };
+    assert_eq!(goal_sync["result"]["structuredContent"]["success"], true);
+    assert_eq!(
+        goal_sync["result"]["structuredContent"]["output"]["goal_plan"]["goal_id"],
+        goal_id
     );
     let present_text = present["result"]["structuredContent"].to_string();
     assert!(!present_text.contains("PRIVATE Agent description"));
@@ -1335,9 +1385,9 @@ async fn agent_continuation_app_protocol_uses_standard_result_without_model_proj
         .scopes
         .retain(|scope| scope != crate::auth::SCOPE_COMMUNICATION_MANAGE);
     for name in APP_TOOLS {
-        if name == "agent_wait_state" {
-            // Agent Wait state is a separate read-only App projection keyed by wait_id;
-            // Store/runtime tests own exact Wait authority and existence-hiding coverage.
+        if matches!(name, "agent_wait_state" | "agent_goal_sync") {
+            // These exact App projections use their own selectors; domain tests
+            // own authority and existence-hiding coverage.
             continue;
         }
         let mut args = json!({

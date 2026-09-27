@@ -314,6 +314,7 @@ test("Goal continuity refreshes on the same authoritative revision without equat
   view.toolResult({ goal_plan: readyPlan });
   assert.equal(view.nodes["auto-resume"].textContent, "Ready");
   assert.equal(view.nodes["continuity-state"].textContent, "Ready");
+  assert.match(view.nodes["continuity-hint"].textContent, /Keep this ChatGPT page open/);
 
   await view.fireTimers(12000);
   const accepted = {
@@ -326,6 +327,7 @@ test("Goal continuity refreshes on the same authoritative revision without equat
   await view.reply(view.calls("goal_plan_sync").at(-1), toolResult({ goal_plan: accepted }));
   assert.equal(view.nodes["host-delivery"].textContent, "Accepted");
   assert.equal(view.nodes["fresh-turn"].textContent, "Not confirmed");
+  assert.match(view.nodes["continuity-hint"].textContent, /Waiting for ChatGPT to start a fresh turn/);
   assert.equal(view.nodes.revision.textContent, "1");
 
   await view.fireTimers(5000);
@@ -339,8 +341,31 @@ test("Goal continuity refreshes on the same authoritative revision without equat
   await view.reply(view.calls("goal_plan_sync").at(-1), toolResult({ goal_plan: resumed }));
   assert.equal(view.nodes["continuity-state"].textContent, "Resume confirmed");
   assert.equal(view.nodes["fresh-turn"].textContent, "Confirmed");
+  assert.match(view.nodes["continuity-hint"].textContent, /ChatGPT resumed this Goal/);
   assert.match(view.nodes["last-resume"].textContent, /^Confirmed/);
   assert.equal(view.nodes.revision.textContent, "1");
+});
+
+test("delivery uncertainty is explained without encouraging an unsafe automatic resend", async () => {
+  const uncertain = {
+    ...plan,
+    controller_agent_id: `wc_dagent_AgAgAgAgAgAgAgAg`,
+    continuity: {
+      ...plan.continuity,
+      available: true,
+      state: "host_unknown",
+      production_auto_resume_available: true,
+      wake_state: "delivery_unknown",
+      host_delivery: "unknown",
+      fresh_turn: "not_confirmed",
+    },
+  };
+  const view = app("mcp_goal_plan_app.html");
+  await view.initialize();
+  view.toolResult({ goal_plan: uncertain });
+  assert.equal(view.nodes["continuity-hint"].hidden, false);
+  assert.match(view.nodes["continuity-hint"].textContent, /will not resend it automatically/);
+  assert.match(view.nodes["continuity-hint"].textContent, /Check the conversation before continuing/);
 });
 
 test("terminal Goal stays terminal and stops polling after late active results and visibility changes", async () => {

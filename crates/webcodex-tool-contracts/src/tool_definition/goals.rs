@@ -21,7 +21,44 @@ const GOAL_SESSION_ASSOCIATE_SCOPES: &[&str] = &[
 
 pub(super) const DEFINITIONS: &[ToolDefinition] = &[
     require_all_scopes(
-        model_spec(
+        adaptive_runtime_direct(
+            model_spec(
+                def(
+                    "start_goal",
+                    super::ToolAuditPolicy::typed_fields(&[
+                        super::ToolAuditResultField::value("goal_id"),
+                        super::ToolAuditResultField::value("agent_id"),
+                        super::ToolAuditResultField::value("created"),
+                        super::ToolAuditResultField::value("replayed"),
+                        super::ToolAuditResultField::value("state_changed"),
+                        super::ToolAuditResultField::value("error_kind"),
+                    ]),
+                    ModelVisible,
+                    TOOL_CATEGORY_GOAL,
+                    None,
+                    TOOL_PROVIDER_CONTROL,
+                    super::ToolSemanticContract {
+                        effect: super::ToolEffect::Mutate,
+                        risk: WorkflowManage,
+                        approval: super::ToolApprovalPolicy::Standard,
+                        idempotency: super::ToolIdempotency::Keyed,
+                    },
+                    Some(COMMUNICATION_MANAGE),
+                    false,
+                    NoPath,
+                    false,
+                    false,
+                    super::ToolSessionEvidencePolicy::NONE,
+                ),
+                "Create a Goal from a natural-language request for substantial multi-step work in an MCP App browser. After project setup, use its exact workflow session_id; derive title, objective, bounded conditions/steps, and a stable key. Never ask the user for internal IDs or to repeat the task. This creates the Goal and its controller Agent/Endpoint. Prefer this direct tool; if absent, call call_runtime_tool(tool=start_goal), then direct present_agent_continuation with returned agent_id, endpoint_id, generation and goal_id when accepted. The gateway alone cannot mount the card. A cached Host schema may omit goal_id; the Server resolves only the unique active Goal for that exact Agent and rejects ambiguity. Continue and checkpoint real work, keep the browser open, and verify production_auto_resume_available before promising auto-resume. If the card cannot be mounted or readiness is false, report the blocker. Same-key retries recover partial setup safely.",
+            )
+            .with_gpt_action_unsupported(),
+            12,
+        ),
+        GOAL_SESSION_ASSOCIATE_SCOPES,
+    ),
+    require_all_scopes(
+        adaptive_runtime_direct(model_spec(
             def(
                 "prepare_goal_workflow",
                 super::ToolAuditPolicy::typed_fields(&[
@@ -55,7 +92,8 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                 super::ToolSessionEvidencePolicy::NONE,
             ),
             "Atomically admit one new durable Goal together with one exact independently authorized Workflow Session correlation and an optional explicit owned controller Agent. The Store commits Goal + correlation + keyed replay identity in one transaction at revision 1. This operation is Host-neutral: it never infers identity from a Window, creates/rotates Endpoints, mounts MCP Apps, establishes Host bindings, creates Wakes, or proves continuation readiness. Use present_goal_plan separately; if automatic continuation is desired, independently establish or verify the controller through the agent_continuation_setup flow.",
-        ),
+        )
+        .with_gpt_action_unsupported(), 13),
         GOAL_SESSION_ASSOCIATE_SCOPES,
     ),
     require_all_scopes(
@@ -181,6 +219,38 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     "workflow_session_count",
                     "/goal_plan/workflow_session_count",
                 ),
+                super::ToolAuditResultField::value("error_kind"),
+            ]),
+            ModelHidden,
+            TOOL_CATEGORY_GOAL,
+            None,
+            TOOL_PROVIDER_CONTROL,
+            super::ToolSemanticContract {
+                effect: super::ToolEffect::Mutate,
+                risk: WorkflowManage,
+                approval: super::ToolApprovalPolicy::Standard,
+                idempotency: super::ToolIdempotency::DesiredState,
+            },
+            Some(COMMUNICATION_MANAGE),
+            false,
+            NoPath,
+            false,
+            false,
+            super::ToolSessionEvidencePolicy::NONE,
+        )
+        .with_activity(
+            super::ToolActivityPresentation::Transport,
+            super::ToolActivityInteraction::NonMeaningful,
+        ),
+        &[SCOPE_COMMUNICATION_READ, SCOPE_COMMUNICATION_MANAGE, SCOPE_RUNTIME_READ, SCOPE_SESSION_COLLABORATE, SCOPE_PROJECT_READ],
+    ),
+    require_all_scopes(
+        def(
+            "agent_goal_sync",
+            super::ToolAuditPolicy::typed_fields(&[
+                super::ToolAuditResultField::pointer("goal_id", "/goal_plan/goal_id"),
+                super::ToolAuditResultField::pointer("lifecycle", "/goal_plan/lifecycle"),
+                super::ToolAuditResultField::pointer("revision", "/goal_plan/revision"),
                 super::ToolAuditResultField::value("error_kind"),
             ]),
             ModelHidden,

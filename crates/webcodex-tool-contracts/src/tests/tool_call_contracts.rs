@@ -2109,13 +2109,15 @@ fn present_agent_continuation_parses_ref_or_explicit_tuple_without_session() {
     let properties = spec.input_schema["properties"].as_object().unwrap();
     assert!(properties.contains_key("agent_continuation_ref"));
     assert!(properties.contains_key("agent_id"));
+    assert!(properties.contains_key("goal_id"));
     if let Some(fields) = spec.input_schema["required"].as_array() {
         for field in fields {
             assert!(
                 field != "agent_id"
                     && field != "endpoint_id"
                     && field != "expected_controller_generation"
-                    && field != "agent_continuation_ref",
+                    && field != "agent_continuation_ref"
+                    && field != "goal_id",
                 "present_agent_continuation must accept either selector form"
             );
         }
@@ -2135,6 +2137,7 @@ fn present_agent_continuation_parses_ref_or_explicit_tuple_without_session() {
             agent_id: None,
             endpoint_id: None,
             expected_controller_generation: None,
+            goal_id: None,
         } if selector == "~ac1"
     ));
     let by_tuple = ToolCall::from_tool_name(
@@ -2153,7 +2156,23 @@ fn present_agent_continuation_parses_ref_or_explicit_tuple_without_session() {
             agent_id: Some(_),
             endpoint_id: Some(_),
             expected_controller_generation: Some(1),
+            goal_id: None,
         }
+    ));
+    let with_goal = ToolCall::from_tool_name(
+        "present_agent_continuation",
+        json!({
+            "agent_id": "wc_dagent_qqqqqqqqqqqqqqqq",
+            "endpoint_id": "wc_endpoint_u7u7u7u7u7u7u7u7",
+            "expected_controller_generation": 1,
+            "goal_id": "wc_goal_zzzzzzzzzzzzzzzz"
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        with_goal,
+        ToolCall::PresentAgentContinuation { goal_id: Some(ref goal_id), .. }
+            if goal_id == "wc_goal_zzzzzzzzzzzzzzzz"
     ));
     assert!(ToolCall::from_tool_name(
         "present_agent_continuation",

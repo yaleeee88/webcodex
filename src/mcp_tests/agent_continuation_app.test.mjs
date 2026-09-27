@@ -45,6 +45,50 @@ const prepared = (current = wake, automatic_message = "Exact test continuation")
 });
 const hostMessages = view => view.sent.filter(message => message.method === "ui/message");
 
+test("Goal card polls only its exact created Goal and stops after a terminal state", async () => {
+  const view = app("mcp_agent_continuation_app.html");
+  await view.initialize();
+  const goalId = "wc_goal_GoalPollingTest1";
+  view.toolInput({ session_id: "wc_sess_GoalPollingTest1", title: "Polling test", objective: "Verify Goal polling" });
+  view.toolResult({ goal_id: goalId, agent_continuation: projection });
+  assert.equal(view.nodes.goalSummary.hidden, false);
+
+  let sync = view.calls("agent_goal_sync")[0];
+  assert.ok(sync, "the created Goal is synchronized as soon as its result arrives");
+  assert.deepEqual(businessArgs(sync), { goal_id: goalId });
+  const activePlan = {
+    goal_id: goalId, title: "Polling test", lifecycle: "active",
+    completed_step_count: 0, total_step_count: 2,
+    continuity: { production_auto_resume_available: true },
+  };
+  await view.reply(sync, toolResult({ goal_plan: activePlan }));
+  assert.equal(view.nodes.goalTitle.textContent, "Polling test");
+  assert.match(view.nodes.goalState.textContent, /Auto resume ready/);
+
+  const quietProjection = { ...projection, wake: null, queued_delivery_count: 0 };
+  const bind = view.calls("agent_continuation_bind")[0];
+  await view.reply(bind, toolResult({ agent_continuation: quietProjection }));
+  const firstHeartbeat = view.calls("agent_continuation_state").at(-1);
+  assert.ok(firstHeartbeat);
+  await view.reply(firstHeartbeat, toolResult({ agent_continuation: quietProjection }));
+  assert.equal(view.calls("agent_goal_sync").length, 1, "the 15 second Goal sync gate prevents duplicate immediate calls");
+
+  // The mounted card's heartbeat triggers another Goal sync after the gate expires.
+  view.advanceTime(12000);
+  await view.fireTimers(3000);
+  sync = view.calls("agent_goal_sync").at(-1);
+  assert.equal(view.calls("agent_goal_sync").length, 2);
+  assert.deepEqual(businessArgs(sync), { goal_id: goalId });
+  await view.reply(sync, toolResult({ goal_plan: {
+    ...activePlan, lifecycle: "completed", completed_step_count: 2,
+  } }));
+  assert.equal(view.nodes.goalState.textContent, "Completed");
+
+  view.advanceTime(15000);
+  await view.fireTimers(3000);
+  assert.equal(view.calls("agent_goal_sync").length, 2, "terminal Goals are no longer polled");
+});
+
 // Simulate the strict published Agent continuation projection schema used by a Host:
 // undeclared fields are dropped recursively rather than being forwarded to the View.
 function projectContinuationByPublishedSchema(value) {
@@ -75,9 +119,9 @@ function projectContinuationByPublishedSchema(value) {
   return projected;
 }
 
-async function boundView(options = { deliverToolMeta: false }) {
+async function boundView(options = { deliverToolMeta: false }, hostCapabilities = { message: {} }) {
   const view = app("mcp_agent_continuation_app.html", options);
-  await view.initialize();
+  await view.initialize("success", hostCapabilities);
   view.toolInput(input);
   await flush();
   await view.reply(view.calls("agent_continuation_bind").at(-1), toolResult({ agent_continuation: projection }));
@@ -708,6 +752,89 @@ test("Host dispatch rejection after prepare is unknown and never resent", async 
   assert.equal(finish.params.arguments.outcome, "delivery_unknown");
   await view.reply(finish, toolResult({}));
   assert.equal(hostMessages(view).length, 1);
+});
+
+test("Host ui/message isError response is not treated as accepted delivery", async () => {
+  const view = await boundView();
+  await view.visibility(true);
+  await view.reply(view.calls("agent_continuation_state").at(-1), toolResult({ agent_continuation: projection }));
+  await view.reply(view.calls("agent_continuation_wake_acquire").at(-1), toolResult({ wake }));
+  await view.reply(view.calls("agent_continuation_wake_prepare").at(-1), prepared());
+  assert.equal(hostMessages(view).length, 1);
+  await view.reply(hostMessages(view)[0], { isError: true });
+  const finish = view.calls("agent_continuation_wake_finish").at(-1);
+  assert.equal(finish.params.arguments.outcome, "delivery_unknown");
+  await view.reply(finish, toolResult({}));
+  assert.equal(hostMessages(view).length, 1);
+});
+
+test("ChatGPT follow-up route is preferred over ui/message when available", async () => {
+  const followUps = [];
+  const openai = { async sendFollowUpMessage(value) { followUps.push(value); } };
+  const view = await boundView({ deliverToolMeta: false, openai }, { message: {} });
+  await view.visibility(true);
+  await view.reply(view.calls("agent_continuation_state").at(-1), toolResult({ agent_continuation: projection }));
+  await view.reply(view.calls("agent_continuation_wake_acquire").at(-1), toolResult({ wake }));
+  await view.reply(view.calls("agent_continuation_wake_prepare").at(-1), prepared());
+  assert.equal(hostMessages(view).length, 0, "the advertised MCP bridge is not used when the Host component API is available");
+  assert.equal(followUps.length, 1);
+  assert.equal(followUps[0].prompt, "Exact test continuation");
+  const finish = view.calls("agent_continuation_wake_finish").at(-1);
+  assert.equal(finish.params.arguments.outcome, "dispatch_accepted");
+  await view.reply(finish, toolResult({}));
+  assert.equal(followUps.length, 1);
+});
+
+test("uncertain ChatGPT follow-up is never retried through ui/message", async () => {
+  let attempts = 0;
+  const openai = { async sendFollowUpMessage() { attempts++; throw new Error("response lost"); } };
+  const view = await boundView({ deliverToolMeta: false, openai }, { message: {} });
+  await view.visibility(true);
+  await view.reply(view.calls("agent_continuation_state").at(-1), toolResult({ agent_continuation: projection }));
+  await view.reply(view.calls("agent_continuation_wake_acquire").at(-1), toolResult({ wake }));
+  await view.reply(view.calls("agent_continuation_wake_prepare").at(-1), prepared());
+  assert.equal(attempts, 1);
+  assert.equal(hostMessages(view).length, 0);
+  assert.equal(view.calls("agent_continuation_wake_finish").at(-1).params.arguments.outcome, "delivery_unknown");
+});
+
+test("missing Host message capability selects ChatGPT follow-up before dispatch", async () => {
+  const followUps = [];
+  const openai = { async sendFollowUpMessage(value) { followUps.push(value); } };
+  const view = await boundView({ deliverToolMeta: false, openai }, {});
+  await view.visibility(true);
+  await view.reply(view.calls("agent_continuation_state").at(-1), toolResult({ agent_continuation: projection }));
+  await view.reply(view.calls("agent_continuation_wake_acquire").at(-1), toolResult({ wake }));
+  await view.reply(view.calls("agent_continuation_wake_prepare").at(-1), prepared());
+  assert.equal(hostMessages(view).length, 0, "unsupported ui/message is skipped before dispatch");
+  assert.equal(followUps.length, 1);
+  assert.equal(followUps[0].prompt, "Exact test continuation");
+  assert.equal(view.calls("agent_continuation_wake_finish").at(-1).params.arguments.outcome, "dispatch_accepted");
+});
+
+test("missing Host message capability without a compatible adapter preserves the unclaimed wake", async () => {
+  const view = await boundView({ deliverToolMeta: false }, {});
+  await view.visibility(true);
+  await view.reply(view.calls("agent_continuation_state").at(-1), toolResult({ agent_continuation: projection }));
+  assert.equal(view.calls("agent_continuation_wake_acquire").length, 0, "unsupported Hosts do not claim work");
+  assert.equal(view.calls("agent_continuation_wake_prepare").length, 0, "unsupported Hosts do not cross the dispatch fence");
+  assert.equal(view.calls("agent_continuation_wake_finish").length, 0);
+  assert.equal(hostMessages(view).length, 0, "the App respects the Host's missing capability");
+  assert.match(view.nodes.status.textContent, /queued work is preserved/i);
+});
+
+test("unreported Host capabilities do not cross the dispatch fence", async () => {
+  const view = app("mcp_agent_continuation_app.html");
+  await view.initialize("success", null);
+  view.toolInput(input);
+  await flush();
+  await view.reply(view.calls("agent_continuation_bind")[0], toolResult({ agent_continuation: projection }));
+  await view.visibility(true);
+  await view.reply(view.calls("agent_continuation_state").at(-1), toolResult({ agent_continuation: projection }));
+  assert.equal(view.calls("agent_continuation_wake_acquire").length, 0);
+  assert.equal(view.calls("agent_continuation_wake_prepare").length, 0);
+  assert.equal(hostMessages(view).length, 0);
+  assert.match(view.nodes.status.textContent, /queued work is preserved/i);
 });
 
 test("Host dispatch timeout is finished as unknown and the same Attempt is never resent", async () => {

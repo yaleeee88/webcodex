@@ -77,13 +77,12 @@ pub(super) const MCP_WORK_RESULT_UI_RESOURCE_LEGACY_URIS: &[&str] = &[
     "ui://webcodex/work-result/v5",
     "ui://webcodex/changes/v3",
 ];
-// Goal Plan intentionally serves only one current resource identity. Hosts may
-// retain a live/cached View by URI across Server deploys, so any shipped App
-// template or incompatible App-tool wire change must advance this URI rather
-// than relying on a same-URI resource refresh.
-pub(super) const MCP_GOAL_PLAN_UI_RESOURCE_URI: &str = "ui://webcodex/goal-plan/v6";
+// Advertise only the current Goal Plan identity, but keep the previous URI
+// readable for Hosts that cached its tool descriptor before a Server restart.
+// A cached v6 descriptor otherwise creates an App card that cannot open.
+pub(super) const MCP_GOAL_PLAN_UI_RESOURCE_URI: &str = "ui://webcodex/goal-plan/v8";
 pub(super) const MCP_AGENT_CONTINUATION_UI_RESOURCE_URI: &str =
-    "ui://webcodex/agent-continuation/v17";
+    "ui://webcodex/agent-continuation/v20";
 pub(super) const MCP_JOB_TERMINAL_CONTINUATION_UI_RESOURCE_URI: &str =
     "ui://webcodex/job-terminal-continuation/v1";
 pub(super) const MCP_UI_RESOURCE_MIME_TYPE: &str = "text/html;profile=mcp-app";
@@ -174,7 +173,7 @@ pub(super) fn mcp_app_resources_list(domain: Option<&str>) -> Value {
         .push(json!({
             "uri": MCP_AGENT_CONTINUATION_UI_RESOURCE_URI,
             "name": "WebCodex Agent Continuation",
-            "description": "Sparse Host controller for one explicit Durable Agent Endpoint generation. The View is a process-local carrier only: SQLite Wake/Wake Delivery Attempt remains authoritative, and Host dispatch is considered actually resumed only after exact consume_agent_wake.",
+            "description": "Sparse Host controller for one explicit Durable Agent Endpoint generation, optionally tracking one Goal created by start_goal. The View is a process-local carrier only: SQLite Wake/Wake Delivery Attempt remains authoritative, and Host dispatch is considered actually resumed only after exact consume_agent_wake.",
             "mimeType": MCP_UI_RESOURCE_MIME_TYPE,
             "_meta": mcp_app_resource_meta(domain)
         }));
@@ -248,8 +247,9 @@ pub(super) fn mcp_work_result_app_resource_read(uri: &str, domain: Option<&str>)
 }
 
 pub(super) fn is_mcp_goal_plan_app_resource_uri(uri: &str) -> bool {
-    // Goal workflow is pre-production: one current resource and wire contract.
     uri == MCP_GOAL_PLAN_UI_RESOURCE_URI
+        || uri == "ui://webcodex/goal-plan/v7"
+        || uri == "ui://webcodex/goal-plan/v6"
 }
 
 pub(super) fn mcp_goal_plan_app_resource_read(uri: &str, domain: Option<&str>) -> Option<Value> {
@@ -266,7 +266,7 @@ pub(super) fn mcp_goal_plan_app_resource_read(uri: &str, domain: Option<&str>) -
 }
 
 pub(super) fn is_mcp_agent_continuation_app_resource_uri(uri: &str) -> bool {
-    // Thin hidden read aliases for existing cards; discovery advertises only v17.
+    // Thin hidden read aliases for existing cards; discovery advertises only v20.
     uri == MCP_AGENT_CONTINUATION_UI_RESOURCE_URI
         || matches!(
             uri,
@@ -286,6 +286,9 @@ pub(super) fn is_mcp_agent_continuation_app_resource_uri(uri: &str) -> bool {
                 | "ui://webcodex/agent-continuation/v14"
                 | "ui://webcodex/agent-continuation/v15"
                 | "ui://webcodex/agent-continuation/v16"
+                | "ui://webcodex/agent-continuation/v17"
+                | "ui://webcodex/agent-continuation/v18"
+                | "ui://webcodex/agent-continuation/v19"
         )
 }
 

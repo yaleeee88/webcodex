@@ -24,6 +24,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
 <main class="card" aria-live="polite">
   <div class="header"><h1 id="agent">Agent</h1><span id="binding" class="badge">Connecting</span></div>
   <div class="summary">Queued work <b id="queued">0</b></div>
+  <div id="goalSummary" class="summary" hidden>Goal <b id="goalTitle">Loading…</b> · <b id="goalState">Connecting</b></div>
   <div id="waitSummary" class="summary" hidden>Wait <b id="waitState">Waiting</b> · matched <b id="waitMatches">0</b></div>
   <div id="status" class="status">Connecting…</div>
   <div id="diagnostics" class="meta" hidden>
@@ -42,6 +43,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
   // exposing protocol internals in the normal product card.
   const DEBUG_DIAGNOSTICS = false;
   const AGENT_ID = /^wc_dagent_[A-Za-z0-9_-]{16}$/;
+  const GOAL_ID = /^wc_goal_[A-Za-z0-9_-]{16}$/;
   const ENDPOINT_ID = /^wc_endpoint_[A-Za-z0-9_-]{16}$/;
   const WAIT_ID = /^wc_agent_wait_[A-Za-z0-9_-]{16}$/;
   const WAKE_ID = /^wc_wake_[A-Za-z0-9_-]{16}$/;
@@ -79,6 +81,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
   let timer = null;
   let coordinationInFlight = false;
   let hostInitialized = false;
+  let hostSupportsMessages = null;
   let bindingStarted = false;
   let bindAttempts = 0;
   let recoveryRebinds = 0;
@@ -93,6 +96,10 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
   let waitLifecycle = null;
   let waitRevision = 0;
   let waitMatchCount = 0;
+  let goalId = null;
+  let goalSyncInFlight = false;
+  let nextGoalSyncAt = 0;
+  let goalTerminal = false;
   const el = id => document.getElementById(id);
   el("diagnostics").hidden = !DEBUG_DIAGNOSTICS;
   el("status").textContent = "Connecting…";
@@ -513,6 +520,33 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     return validProjection(output && output.agent_continuation);
   }
 
+  async function syncGoal() {
+    if (!goalId || goalTerminal || goalSyncInFlight || tornDown || !hostInitialized) return;
+    if (Date.now() < nextGoalSyncAt) return;
+    goalSyncInFlight = true;
+    nextGoalSyncAt = Date.now() + 15000;
+    try {
+      // The Goal store alone decides when a stalled Goal is eligible for a Wake.
+      // This mounted continuation card keeps reconciliation alive without a
+      // second presentation call or a model-controlled polling loop.
+      const result = await callTool("agent_goal_sync", { goal_id: goalId });
+      const plan = outputOf(result)?.goal_plan;
+      if (!toolCallSucceeded(result) || !plan || plan.goal_id !== goalId
+        || typeof plan.title !== "string" || !["active", "completed", "cancelled"].includes(plan.lifecycle)) {
+        throw new Error("Goal state unavailable");
+      }
+      el("goalTitle").textContent = plan.title;
+      el("goalState").textContent = plan.lifecycle === "active"
+        ? `${plan.completed_step_count} / ${plan.total_step_count} steps · ${plan.continuity?.production_auto_resume_available ? "Auto resume ready" : "Waiting for browser binding"}`
+        : plan.lifecycle === "completed" ? "Completed" : "Cancelled";
+      goalTerminal = plan.lifecycle !== "active";
+    } catch (_) {
+      if (!tornDown && !goalTerminal) el("goalState").textContent = "State refresh pending";
+    } finally {
+      goalSyncInFlight = false;
+    }
+  }
+
   function exactArgsFor(selector, extra = {}) {
     return Object.assign({
       agent_id: selector.agent_id,
@@ -563,6 +597,8 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     el("binding").textContent = "Connected";
     if (projection.dispatch_observation === "continuation_consumed") {
       el("status").textContent = "Work resumed successfully";
+    } else if (projection.dispatch_observation === "dispatch_unknown") {
+      el("status").textContent = "The Host did not confirm this continuation. Check the conversation before resuming.";
     } else if (document.hidden) {
       el("status").textContent = projection.wake ? "Continuing queued work in background…" : "Connected in background";
     } else if (projection.wake) {
@@ -695,6 +731,13 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
 
   async function dispatchWake(wake) {
     if (dispatchStarted === wake.attempt_id || prepareUncertain === wake.attempt_id) return;
+    const chatGpt = typeof window !== "undefined" && window.openai;
+    const followUp = chatGpt && typeof chatGpt.sendFollowUpMessage === "function"
+      ? chatGpt.sendFollowUpMessage.bind(chatGpt)
+      : null;
+    // Never cross the durable prepare fence unless this View has a positively
+    // identified Host dispatch route. A missing capability is not support.
+    if (!followUp && hostSupportsMessages !== true) return;
     let automaticMessage;
     try {
       automaticMessage = await prepare(wake);
@@ -717,11 +760,22 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     dispatchStarted = wake.attempt_id;
     let outcome = "delivery_unknown";
     try {
-      await request("ui/message", {
-        role: "user",
-        content: [{ type: "text", text: automaticMessage }],
-      });
-      outcome = "dispatch_accepted";
+      // Prefer a Host's documented component follow-up API when present. It is
+      // the explicit ChatGPT route for posting a message authored by an App.
+      // Otherwise use the portable MCP Apps bridge only when advertised.
+      if (followUp) {
+        await followUp({ prompt: automaticMessage });
+        outcome = "dispatch_accepted";
+      } else {
+        const result = await request("ui/message", {
+          role: "user",
+          content: [{ type: "text", text: automaticMessage }],
+        });
+        if (result && typeof result === "object" && result.isError === true) {
+          throw new Error("Host rejected the continuation message");
+        }
+        outcome = "dispatch_accepted";
+      }
     } catch (_) {
       // After prepare, Host rejection/timeout/response loss is conservatively unknown.
     }
@@ -788,6 +842,7 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
 
   async function reconcile() {
     if (tornDown || !identity || !bindingId || coordinationInFlight) return scheduleNext();
+    void syncGoal();
     coordinationInFlight = true;
     try {
       await retryPendingFinish();
@@ -801,6 +856,16 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
       // pending ACK first while still renewing the Endpoint on every poll.
       if (pendingFinish) return;
       if (!projection.wake || projection.dispatch_observation === "continuation_consumed") return;
+      const chatGpt = typeof window !== "undefined" && window.openai;
+      const hasChatGptFollowUp = !!chatGpt && typeof chatGpt.sendFollowUpMessage === "function";
+      if (hostSupportsMessages !== true && !hasChatGptFollowUp) {
+        // Do not claim or prepare a Wake when this Host has not advertised
+        // `ui/message` and exposes no documented component follow-up API.
+        // Preparing first would cross the durable dispatch
+        // fence and strand a definitely-undispatched Wake as delivery_unknown.
+        el("status").textContent = "No automatic follow-up route is available here. The queued work is preserved.";
+        return;
+      }
       const wake = await acquire();
       if (!wake || tornDown) return;
       if (wake.dispatch_observation === "dispatch_accepted" || wake.dispatch_observation === "dispatch_unknown") return;
@@ -840,6 +905,10 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
     // MCP Apps 2026-01-26: complete tool input is params.arguments.
     // This is an exact selector only; every tool call is reauthorized by Server.
     const args = params && params.arguments;
+    // start_goal creates the selector on the Server. Its exact Agent/Endpoint
+    // identity arrives in the successful result, never in model input.
+    if (args && typeof args.session_id === "string" && typeof args.title === "string"
+      && typeof args.objective === "string" && !Object.prototype.hasOwnProperty.call(args, "agent_id")) return;
     if (!acceptIdentity(args && !Array.isArray(args) && {
       agent_id: args.agent_id,
       endpoint_id: args.endpoint_id,
@@ -849,6 +918,20 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
   }
 
   function acceptToolResult(result) {
+    const envelope = structuredOf(result);
+    if (envelope && envelope.success === false) {
+      el("binding").textContent = "Unavailable";
+      el("status").textContent = envelope.output && GOAL_ID.test(envelope.output.goal_id || "")
+        ? "Goal created, but browser continuation setup failed. Retry with the same request."
+        : "Goal or continuation setup failed. Check the tool result and retry.";
+      return;
+    }
+    const initial = outputOf(result);
+    if (initial && GOAL_ID.test(initial.goal_id || "") && !goalId) {
+      goalId = initial.goal_id;
+      el("goalSummary").hidden = false;
+      void syncGoal();
+    }
     const projection = projectionOf(result);
     if (!projection || !acceptIdentity(projection)) return;
     const output = outputOf(result);
@@ -964,10 +1047,14 @@ h1 { margin: 0; font-size: 15px; font-weight: 650; overflow-wrap: anywhere; }
 
   request("ui/initialize", {
     protocolVersion: APP_PROTOCOL,
-    appInfo: { name: "webcodex-agent-continuation-app", title: "WebCodex Agent Continuation", version: "17.0.0" },
+    appInfo: { name: "webcodex-agent-continuation-app", title: "WebCodex Agent Continuation", version: "21.0.0" },
     appCapabilities: {},
-  }).then(() => {
+  }).then(result => {
     if (tornDown) return;
+    const capabilities = result && result.hostCapabilities;
+    hostSupportsMessages = capabilities && typeof capabilities === "object"
+      ? !!(capabilities.message && typeof capabilities.message === "object" && !Array.isArray(capabilities.message))
+      : null;
     hostInitialized = true;
     el("status").textContent = "Waiting for Agent connection…";
     notify("ui/notifications/initialized", {});

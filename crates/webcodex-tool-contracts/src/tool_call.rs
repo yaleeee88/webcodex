@@ -2969,6 +2969,25 @@ pub enum ToolCall {
         idempotency_key: String,
     },
 
+    /// Create a Goal and its browser continuation controller for an exact Workflow Session.
+    /// The resulting MCP App must stay mounted in the open browser to resume stalled work.
+    StartGoal {
+        #[schemars(regex(pattern = "^wc_sess_([A-Za-z0-9_-]{16}|[0-9a-f]{32})$"))]
+        session_id: String,
+        #[schemars(length(min = 1, max = 200))]
+        title: String,
+        #[schemars(length(min = 1, max = 8192))]
+        objective: String,
+        #[serde(default)]
+        #[schemars(schema_with = "goal_conditions_schema")]
+        completion_conditions: Vec<String>,
+        #[serde(default)]
+        #[schemars(length(max = 32))]
+        steps: Vec<GoalStepInputCall>,
+        #[schemars(length(min = 1, max = 128))]
+        idempotency_key: String,
+    },
+
     /// Create explicit high-level durable intent/control state without execution authority.
     CreateGoal {
         /// Fixed durable completion intent; the Server does not evaluate natural-language conditions.
@@ -3020,6 +3039,13 @@ pub enum ToolCall {
     /// may commit one durable stall Attention/Wake, then returns the final bounded
     /// Goal Plan projection. No caller timing or authority selectors are accepted.
     GoalPlanSync {
+        #[schemars(regex(pattern = "^wc_goal_[A-Za-z0-9_-]{16}$"))]
+        goal_id: String,
+    },
+
+    /// The same Server-owned Goal reconciliation, reached from the Agent
+    /// continuation App resource that carries browser-open Goal turns.
+    AgentGoalSync {
         #[schemars(regex(pattern = "^wc_goal_[A-Za-z0-9_-]{16}$"))]
         goal_id: String,
     },
@@ -3563,6 +3589,11 @@ pub enum ToolCall {
         #[schemars(range(min = 1))]
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expected_controller_generation: Option<i64>,
+        /// Optional exact Goal whose controller_agent_id must match the selected Agent.
+        /// This carries Goal state into the browser continuation card; it grants no authority.
+        #[schemars(regex(pattern = "^wc_goal_[A-Za-z0-9_-]{16}$"))]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        goal_id: Option<String>,
     },
 
     /// App-only bind of one live Host View to an exact freshly attached Endpoint generation.
@@ -5076,7 +5107,7 @@ pub enum ToolCall {
         /// Distinct from intent.
         #[serde(default)]
         category: Option<String>,
-        /// Optional task intent view such as coding, audit, exploration,
+        /// Optional task intent view such as coding, goal, audit, exploration,
         /// release, or discovery. Distinct from `category`. Discovery filtering
         /// only; does not change tool behavior or finish verdict semantics.
         #[serde(default)]
@@ -5567,10 +5598,12 @@ impl ToolCall {
             Self::SkillActivate { .. } => "skill_activate",
             Self::SkillRemoveRevision { .. } => "skill_remove_revision",
             Self::PrepareGoalWorkflow { .. } => "prepare_goal_workflow",
+            Self::StartGoal { .. } => "start_goal",
             Self::CreateGoal { .. } => "create_goal",
             Self::GetGoal { .. } => "get_goal",
             Self::PresentGoalPlan { .. } => "present_goal_plan",
             Self::GoalPlanSync { .. } => "goal_plan_sync",
+            Self::AgentGoalSync { .. } => "agent_goal_sync",
             Self::CheckpointGoal { .. } => "checkpoint_goal",
             Self::ListGoals { .. } => "list_goals",
             Self::UpdateGoal { .. } => "update_goal",

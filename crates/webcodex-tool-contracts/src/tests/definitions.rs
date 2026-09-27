@@ -302,6 +302,7 @@ fn tool_definitions_are_activity_semantics_ssot() {
         ("runtime_status", Support, NonMeaningful, NoKind),
         ("tool_manifest", Support, NonMeaningful, NoKind),
         ("goal_plan_sync", Transport, NonMeaningful, NoKind),
+        ("agent_goal_sync", Transport, NonMeaningful, NoKind),
         (
             "bootstrap_agent_conversation",
             Transport,
@@ -330,6 +331,7 @@ fn tool_definitions_are_activity_semantics_ssot() {
         "tool_manifest",
         "read_tool_trace",
         "goal_plan_sync",
+        "agent_goal_sync",
         "bootstrap_agent_conversation",
         "consume_agent_wake",
         "work_result_state",

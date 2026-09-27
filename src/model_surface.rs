@@ -477,7 +477,7 @@ mod tests {
         ] {
             assert!(tool_requires_direct_app_presentation(tool), "{tool}");
         }
-        for ordinary in ["run_shell", "run_script", "show_changes"] {
+        for ordinary in ["run_shell", "run_script", "show_changes", "start_goal"] {
             assert!(
                 !tool_requires_direct_app_presentation(ordinary),
                 "{ordinary}"

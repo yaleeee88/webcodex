@@ -2518,6 +2518,35 @@ impl ToolRuntime {
                 .await
             }
 
+            ToolCall::StartGoal {
+                session_id,
+                title,
+                objective,
+                completion_conditions,
+                steps,
+                idempotency_key,
+            } => {
+                self.start_goal(
+                    auth,
+                    session_id,
+                    crate::db::NewGoal {
+                        title,
+                        objective,
+                        controller_agent_id: None,
+                        completion_conditions,
+                        idempotency_key,
+                        steps: steps
+                            .into_iter()
+                            .map(|step| crate::db::NewGoalStep {
+                                id: step.id,
+                                title: step.title,
+                            })
+                            .collect(),
+                    },
+                )
+                .await
+            }
+
             ToolCall::PrepareGoalWorkflow {
                 session_id,
                 title,
@@ -2596,7 +2625,7 @@ impl ToolRuntime {
 
             ToolCall::PresentGoalPlan { goal_id } => self.present_goal_plan(auth, goal_id).await,
 
-            ToolCall::GoalPlanSync { goal_id } => {
+            ToolCall::GoalPlanSync { goal_id } | ToolCall::AgentGoalSync { goal_id } => {
                 self.goal_plan_sync_for_window(auth, window, goal_id).await
             }
 
@@ -2867,12 +2896,14 @@ impl ToolRuntime {
                 agent_id,
                 endpoint_id,
                 expected_controller_generation,
-            } => self.present_agent_continuation_with_selector(
+                goal_id,
+            } => self.present_agent_continuation_with_goal_selector(
                 auth,
                 agent_continuation_ref,
                 agent_id,
                 endpoint_id,
                 expected_controller_generation,
+                goal_id,
             ),
 
             ToolCall::AgentContinuationBind {

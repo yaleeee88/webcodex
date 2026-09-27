@@ -223,6 +223,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                         super::ToolAuditResultField::pointer("wake_state", "/agent_continuation/wake/state"),
                         super::ToolAuditResultField::pointer("queued_delivery_count", "/agent_continuation/queued_delivery_count"),
                         super::ToolAuditResultField::pointer("dispatch_observation", "/agent_continuation/dispatch_observation"),
+                        super::ToolAuditResultField::value("goal_id"),
                         super::ToolAuditResultField::value("error_kind"),
                     ]),
                     ModelVisible,
@@ -242,7 +243,7 @@ pub(super) const DEFINITIONS: &[ToolDefinition] = &[
                     false,
                     super::ToolSessionEvidencePolicy::NONE,
                 ),
-                "Present one explicit durable Agent/Endpoint generation as a sparse MCP App continuation controller card. Pass either agent_continuation_ref from rotate_agent_continuation_endpoint or list_agent_identities, or the exact agent_id, endpoint_id, and expected_controller_generation. The ref only names that pinned tuple; it is not a credential, and this read still rechecks owner, lifecycle, and generation. New durable Agent window setup is create_agent_identity -> rotate_agent_continuation_endpoint -> present_agent_continuation; after presentation, yield/end the current model turn promptly so the MCP App can establish and maintain the Host binding. Presentation success is not production auto-resume readiness: verify list_agent_identities.production_auto_resume_available afterward. Presentation is read-only and never itself establishes Host binding or execution authority.",
+                "Present one exact Agent/Endpoint continuation card. Use agent_continuation_ref or the exact Agent/Endpoint/generation tuple. For Goal creation through the generic runtime gateway, pass returned goal_id when the Host schema accepts it. If a cached Host schema omits it, the Server may bind only the unique active Goal controlled by this exact Agent; multiple matches fail closed. Selectors are not credentials; owner, lifecycle, and generation are rechecked. New Agent setup is create_agent_identity -> rotate_agent_continuation_endpoint -> present_agent_continuation, then yield/end the current model turn promptly so the MCP App can bind. Presentation is not production auto-resume readiness; verify list_agent_identities.production_auto_resume_available. This read never establishes Host binding or execution authority.",
             )
             .with_gpt_action_unsupported(),
             18,

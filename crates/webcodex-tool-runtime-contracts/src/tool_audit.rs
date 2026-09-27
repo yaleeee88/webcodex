@@ -4437,6 +4437,21 @@ impl ToolCallAuditProjection for ToolCall {
                 "items": items,
                 "with_line_numbers": with_line_numbers,
             }),
+            Self::StartGoal {
+                session_id,
+                title,
+                objective,
+                idempotency_key,
+                ..
+            } => typed_goal_request_audit(
+                GoalRequestAudit::Prepare,
+                &serde_json::json!({
+                    "session_id": session_id,
+                    "title": title,
+                    "objective": objective,
+                    "idempotency_key": idempotency_key,
+                }),
+            ),
             Self::PrepareGoalWorkflow {
                 session_id,
                 title,
@@ -4488,12 +4503,12 @@ impl ToolCallAuditProjection for ToolCall {
                 GoalRequestAudit::Get,
                 &serde_json::json!({"goal_id": goal_id}),
             ),
-            Self::PresentGoalPlan { goal_id } | Self::GoalPlanSync { goal_id } => {
-                typed_goal_request_audit(
-                    GoalRequestAudit::Get,
-                    &serde_json::json!({"goal_id": goal_id}),
-                )
-            }
+            Self::PresentGoalPlan { goal_id }
+            | Self::GoalPlanSync { goal_id }
+            | Self::AgentGoalSync { goal_id } => typed_goal_request_audit(
+                GoalRequestAudit::Get,
+                &serde_json::json!({"goal_id": goal_id}),
+            ),
             Self::ListGoals {
                 lifecycle,
                 offset,
@@ -4800,11 +4815,13 @@ impl ToolCallAuditProjection for ToolCall {
                 agent_id,
                 endpoint_id,
                 expected_controller_generation,
+                goal_id,
             } => serde_json::json!({
                 "agent_continuation_ref": agent_continuation_ref,
                 "agent_id": agent_id,
                 "endpoint_id": endpoint_id,
                 "expected_controller_generation": expected_controller_generation,
+                "goal_id": goal_id,
             }),
             Self::AgentContinuationBind {
                 agent_id,

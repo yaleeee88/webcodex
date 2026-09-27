@@ -391,6 +391,10 @@ fn assert_all_objects_strict(schema: &Value, path: &str, open_boundaries: &[&str
 #[test]
 fn agent_continuation_projection_schema_requires_strict_nullable_restart_recovery() {
     let schema = output_schema_for_tool("present_agent_continuation");
+    assert_eq!(
+        schema["properties"]["output"]["properties"]["goal_id"]["anyOf"][0]["pattern"],
+        "^wc_goal_[A-Za-z0-9_-]{16}$"
+    );
     let projection = &schema["properties"]["output"]["properties"]["agent_continuation"];
     assert_eq!(projection["additionalProperties"], false);
     assert!(projection["required"]

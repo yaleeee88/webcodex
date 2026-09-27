@@ -421,7 +421,7 @@ pub(super) fn output_schema_for_tool(name: &str) -> Option<Value> {
                 "intent",
                 nullable_schema(
                     "string",
-                    "Resolved task-intent view such as coding, audit, exploration, release, or discovery; null when no intent was requested. Intent views only filter and rank discovery output; they do not change tool behavior, policy, permissions, execution, or finish verdict semantics.",
+                    "Resolved task-intent view such as coding, goal, audit, exploration, release, or discovery; null when no intent was requested. Intent views only filter and rank discovery output; they do not change tool behavior, policy, permissions, execution, or finish verdict semantics.",
                 ),
             ),
             (

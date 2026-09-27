@@ -800,6 +800,15 @@ jobs:
             -BuiltAt ([Int64]"${{ steps.runtime.outputs.built_at }}") `
             -Platform win32-x64 `
             -InstallDir $customInstallDir
+      - name: Upload Windows Desktop installer for pull requests
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: webcodex-goal-desktop-${{ github.sha }}
+          path: ${{ env.DESKTOP_CI_INSTALLER }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
   test-windows:
     needs: [contract, changes, test-windows-core, test-windows-runner, test-windows-package, test-windows-desktop]

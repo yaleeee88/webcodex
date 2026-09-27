@@ -96,6 +96,7 @@ pub const TOOL_DISCOVERY_GROUPS: &[ToolDiscoveryGroup] = &[
     ToolDiscoveryGroup {
         name: TOOL_DISCOVERY_GROUP_GOAL,
         tools: &[
+            "start_goal",
             "prepare_goal_workflow",
             "create_goal",
             "get_goal",
@@ -355,10 +356,11 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
     },
     ToolRecommendedFlow {
         name: "single_window_goal_workflow",
-        summary: "Substantial work: on exact Session re-entry reuse explicit active Goal context; otherwise atomically admit a new Goal + Session. Present, checkpoint, verify/review and explicitly complete. Optional auto-resume reuses an explicit durable controller through the separate continuation setup flow.",
-        manifest_purpose: "WebCodex-owned cross-repository workflow, not AGENTS.md policy. work_on_project may return sparse goal_context for active Goals explicitly correlated to the exact authorized Workflow Session. Reuse one exact candidate by calling get_goal and present_goal_plan; with multiple candidates, read candidate details through exact get_goal calls and explicitly choose one before present_goal_plan. Never auto-select or infer from Project, Window, title, or recency. For ordinary new multi-step/cross-turn work without reusable active Goal context, call prepare_goal_workflow with the exact Workflow Session, bounded completion_conditions/steps and optional explicit controller Agent, then present_goal_plan. available=false is inconclusive evidence, not proof of zero active Goals. prepare_goal_workflow is durable admission only: Host carrier setup/readiness remains separate. If auto-resume is required and the chosen controller is not already production-ready, use the existing agent_continuation_setup flow. Use checkpoint_goal at recovery-worthy boundaries; finish_coding_task returns the same sparse active Goal representation as goal_follow_up. After fresh validation/review explicitly complete all steps and update_goal. Low-level create_goal and associate_goal_workflow_session remain available for advanced composition. Tiny reads/trivial edits do not require Goal setup.",
+        summary: "For browser-open Goal work, use work_on_project then start_goal. Do not stop after creation: present the Agent Continuation carrier, execute and checkpoint real work, verify browser readiness, then explicitly complete the Goal.",
+        manifest_purpose: "WebCodex-owned cross-repository workflow, not AGENTS.md policy. For natural-language Goal creation in an MCP App browser, use start_goal after work_on_project and never ask for internal IDs. Prefer direct start_goal, whose result carries the Agent Continuation App. If direct start_goal is absent, call call_runtime_tool(tool=start_goal, arguments=...) and then direct present_agent_continuation with the exact returned Agent/Endpoint/generation; pass the goal_id returned by start_goal when the Host schema accepts it. The gateway result alone cannot mount the continuation App. Do not substitute present_goal_plan: it displays Goal state but does not keep the Agent Endpoint alive or enable browser auto-resume. A cached Host schema may omit goal_id, so the Server resolves only the unique active Goal controlled by that exact Agent and rejects ambiguity. After creation, continue the requested work in the same turn and checkpoint real verified progress at recovery boundaries; do not finish with only a creation receipt. Before relying on auto-resume or telling the user to wait, verify production_auto_resume_available=true. If it is false or the continuation card is absent, repair the exact continuation setup or report the specific unavailable tool. work_on_project may return sparse goal_context for active Goals correlated to the exact authorized Workflow Session. Reuse one exact candidate by calling get_goal and present_goal_plan; with multiple candidates, read candidate details through exact get_goal calls and explicitly choose one before present_goal_plan. Never infer from Project, Window, title, or recency. In a Host without MCP Apps, or for advanced composition, call prepare_goal_workflow with the exact Workflow Session and bounded conditions/steps, then present_goal_plan. prepare_goal_workflow is durable admission only and does not provide browser continuation. available=false is inconclusive. Use checkpoint_goal at recovery boundaries; finish_coding_task returns sparse active Goal context. Explicitly complete only after fresh verification. Low-level create_goal and associate_goal_workflow_session remain available. Tiny reads do not require Goal setup.",
         tools: &[
-            "work_on_project", "get_goal", "prepare_goal_workflow", "present_goal_plan",
+            "work_on_project", "get_goal", "start_goal", "present_agent_continuation",
+            "prepare_goal_workflow", "present_goal_plan",
             "checkpoint_goal", "finish_coding_task", "update_goal",
         ],
     },
@@ -544,6 +546,8 @@ pub const TOOL_RECOMMENDED_FLOWS: &[ToolRecommendedFlow] = &[
 /// not define direct admission. ToolDefinition rank remains the direct SSOT.
 pub const CODING_INTENT_TOOL_NAMES: &[&str] = &[
     "work_on_project",
+    "start_goal",
+    "present_agent_continuation",
     "project_overview",
     "search_and_read",
     "search_project_texts",
@@ -585,6 +589,20 @@ pub const CODING_INTENT_TOOL_NAMES: &[&str] = &[
     "finish_coding_task",
 ];
 
+/// Focused selection for natural-language, browser-continuable Goal work.
+pub const GOAL_INTENT_TOOL_NAMES: &[&str] = &[
+    "work_on_project",
+    "start_goal",
+    "get_goal",
+    "present_agent_continuation",
+    "list_agent_identities",
+    "prepare_goal_workflow",
+    "present_goal_plan",
+    "checkpoint_goal",
+    "finish_coding_task",
+    "update_goal",
+];
+
 /// Stable task-intent views for `tool_manifest(intent=...)`.
 /// Ordered lists are ranked for model selection; not a substitute for category.
 /// Intent views only filter and rank discovery output; they do not change tool
@@ -594,6 +612,11 @@ pub const TOOL_MANIFEST_INTENTS: &[ToolManifestIntent] = &[
         name: "coding",
         purpose: "Default coding loop: start, inspect, make reliable scoped changes, validate, review, report.",
         tools: CODING_INTENT_TOOL_NAMES,
+    },
+    ToolManifestIntent {
+        name: "goal",
+        purpose: "Create or continue a substantial Goal from natural language, keep browser continuation ready, checkpoint progress, verify, and complete.",
+        tools: GOAL_INTENT_TOOL_NAMES,
     },
     ToolManifestIntent {
         name: "audit",

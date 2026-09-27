@@ -259,6 +259,44 @@ pub(super) fn active_goal_context_schema() -> Value {
 
 pub fn output_schema_for_tool(name: &str) -> Option<Value> {
     let schema = match name {
+        "start_goal" => wrapped_output_schema(vec![
+            (
+                "goal_id",
+                json!({"type": "string", "pattern": "^wc_goal_[A-Za-z0-9_-]{16}$"}),
+            ),
+            (
+                "agent_id",
+                json!({"type": "string", "pattern": "^wc_dagent_[A-Za-z0-9_-]{16}$"}),
+            ),
+            ("goal", goal_detail_schema()),
+            (
+                "created",
+                schema_type("boolean", "True only on first Goal creation."),
+            ),
+            (
+                "replayed",
+                schema_type("boolean", "True on exact Goal idempotency replay."),
+            ),
+            (
+                "state_changed",
+                schema_type("boolean", "Whether this call admitted a new Goal."),
+            ),
+            (
+                "agent_continuation",
+                super::communication::agent_continuation_projection_schema(),
+            ),
+            (
+                "continuation_state",
+                json!({"type": "string", "enum": ["awaiting_browser_binding", "ready"]}),
+            ),
+            (
+                "next_action",
+                schema_type(
+                    "string",
+                    "Next model action; browser binding is not yet proven.",
+                ),
+            ),
+        ]),
         "prepare_goal_workflow"
         | "create_goal"
         | "update_goal"
@@ -266,7 +304,7 @@ pub fn output_schema_for_tool(name: &str) -> Option<Value> {
         | "associate_goal_agent_task"
         | "associate_goal_workflow_session" => goal_mutation_schema(),
         "get_goal" => wrapped_output_schema(vec![("goal", goal_detail_schema())]),
-        "present_goal_plan" | "goal_plan_sync" => {
+        "present_goal_plan" | "goal_plan_sync" | "agent_goal_sync" => {
             wrapped_output_schema(vec![("goal_plan", goal_plan_schema())])
         }
         "list_goals" => wrapped_output_schema(vec![

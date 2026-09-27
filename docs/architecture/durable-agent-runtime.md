@@ -195,7 +195,38 @@ normal exact-Session continuation
 optional automatic continuation
   -> reuse one exact explicit durable controller Agent
   -> if its carrier is not ready, use the separate agent_continuation_setup flow
+
+browser-open natural-language shortcut
+  -> work_on_project(project, instruction) -> exact Workflow Session
+  -> start_goal(session_id, title, objective, completion_conditions?, steps?, idempotency_key)
+       # keyed Agent + Endpoint setup, atomic Goal admission, one continuation card
+  -> work and checkpoint; end the turn so the browser card can bind
+  -> keep the ChatGPT browser open until the Goal is explicitly completed
 ```
+
+`start_goal` is a model-facing shortcut for a user who supplied a natural-language
+Goal and asked for browser-open continuation. The model derives the title and plan;
+the user never supplies internal Session, Agent, Endpoint, or Goal ids. It first
+reauthorizes the exact Session, then uses separate stable keyed operations for
+the controller Agent and Endpoint before the existing atomic Goal admission.
+Exact-key retry converges on those same durable resources after a lost response.
+When the Host lacks the direct `start_goal` callable, the generic runtime gateway
+creates the same resources but cannot mount an MCP App. The subsequent direct
+`present_agent_continuation` should include the returned `goal_id` when the Host
+schema accepts it; the Server checks that the Goal is owned by the caller and
+that its controller is the exact selected Agent, then passes that association
+to the View. Some cached Host schemas omit this optional field. In that case
+the Server resolves only a unique active Goal controlled by the exact selected
+Agent; multiple matches fail closed. It never selects by Window, Project, title,
+or recency.
+The returned Agent Continuation card calls its app-only `agent_goal_sync` route
+to the same `goal_plan_sync` reconciliation while mounted,
+so the same browser card observes Goal state and drives the existing authoritative
+stall detector. The card may mount only after the model turn ends. Creation reports
+`awaiting_browser_binding`, not Host readiness; the latter is observed through
+`list_agent_identities.production_auto_resume_available` and Goal continuity.
+Browser close, Host scheduling failure, or a disconnected tunnel can still stop
+automatic turns. The Goal remains durable for later recovery.
 
 `prepare_goal_workflow` is deliberately Host-neutral. ToolRuntime first calls the
 existing exact Session authorization path, which rechecks the immutable Session
@@ -289,7 +320,7 @@ coding tools, and no Goal lifecycle is inferred from Session closeout.
 
 ### Goal Plan progress projection and inactivity detector
 
-The sole current Goal Plan resource is `ui://webcodex/goal-plan/v6`; its sole current
+The sole current Goal Plan resource is `ui://webcodex/goal-plan/v8`; its sole current
 wire version is **3**. Older pre-production Goal resource aliases are not served.
 Goal Plan deliberately advances its canonical resource URI whenever its shipped View
 or App-tool wire changes: production Hosts may retain a same-URI View across Server
@@ -401,7 +432,9 @@ Goal Plan sync -> authoritative observation + fenced reconciliation in one RPC
  -> get_goal -> exact session_handoff_summary -> continue latest checkpoint
 ```
 
-Goal Plan never calls `ui/message`; the cards remain separate. If the Goal controller
+Goal Plan never calls `ui/message`; the cards remain separate for the lower-level
+presentation flow. The `start_goal` continuation card may invoke `agent_goal_sync`
+itself and still uses the same Server-owned detector and Wake fences. If the Goal controller
 has no production Host carrier, the Wake remains durable/pending. The existing
 `production_auto_resume_available` means exact Agent/generation Host carrier
 readiness only, never worker idleness, model-turn liveness, progress or a lease.

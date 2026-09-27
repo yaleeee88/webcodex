@@ -90,6 +90,7 @@ fn tool_call_parser_name_gate_matches_tool_definitions() {
         "start_session",
         "job_tail",
         "goal_plan_sync",
+        "agent_goal_sync",
         "work_result_state",
         "work_result_send_message",
         "apply_patch",

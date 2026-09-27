@@ -2762,9 +2762,18 @@ fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
 fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
+    // ReplaceFile preserves the replaced file's ACL and EFS attributes. This
+    // matters for Desktop state under an encrypted AppData directory: MoveFileEx
+    // can reject replacement of the existing encrypted backup even though the
+    // temporary sibling was written successfully.
+    let destination_exists = match std::fs::symlink_metadata(destination) {
+        Ok(_) => true,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+        Err(error) => return Err(error),
+    };
     let source = source
         .as_os_str()
         .encode_wide()
@@ -2776,11 +2785,22 @@ fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
         .chain(std::iter::once(0))
         .collect::<Vec<_>>();
     let result = unsafe {
-        MoveFileExW(
-            source.as_ptr(),
-            destination.as_ptr(),
-            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
-        )
+        if destination_exists {
+            ReplaceFileW(
+                destination.as_ptr(),
+                source.as_ptr(),
+                std::ptr::null(),
+                0,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        } else {
+            MoveFileExW(
+                source.as_ptr(),
+                destination.as_ptr(),
+                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH,
+            )
+        }
     };
     if result == 0 {
         Err(io::Error::last_os_error())

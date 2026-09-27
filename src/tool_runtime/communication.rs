@@ -654,6 +654,7 @@ impl ToolRuntime {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn present_agent_continuation_with_selector(
         &self,
         auth: Option<&AuthContext>,
@@ -674,6 +675,135 @@ impl ToolRuntime {
             Err(result) => return result,
         };
         self.present_agent_continuation(auth, agent_id, endpoint_id, expected_controller_generation)
+    }
+
+    pub(crate) fn present_agent_continuation_with_goal_selector(
+        &self,
+        auth: Option<&AuthContext>,
+        agent_continuation_ref: Option<String>,
+        agent_id: Option<String>,
+        endpoint_id: Option<String>,
+        expected_controller_generation: Option<i64>,
+        goal_id: Option<String>,
+    ) -> ToolResult {
+        let (agent_id, endpoint_id, expected_controller_generation) = match self
+            .resolve_agent_continuation_selector(
+                auth,
+                agent_continuation_ref,
+                agent_id,
+                endpoint_id,
+                expected_controller_generation,
+            ) {
+            Ok(tuple) => tuple,
+            Err(result) => return result,
+        };
+
+        let principal = match communication_principal(auth) {
+            Ok(principal) => principal,
+            Err(result) => return result,
+        };
+        let Some(db) = self.communication_db.as_ref() else {
+            return communication_store_unavailable();
+        };
+        let goal_id = if let Some(goal_id) = goal_id {
+            let goal = match db.read_goal(&principal, &goal_id) {
+                Ok(goal) => goal,
+                Err(error) => {
+                    return ToolResult::err_with_output(
+                        error.message(),
+                        serde_json::json!({
+                            "error_kind": error.code(),
+                            "state_changed": false,
+                        }),
+                    )
+                }
+            };
+            if goal.controller_agent_id.as_deref() != Some(agent_id.as_str()) {
+                return ToolResult::err_with_output(
+                    "The selected Goal is not controlled by this Agent",
+                    serde_json::json!({
+                        "error_kind": "goal_controller_mismatch",
+                        "state_changed": false,
+                    }),
+                );
+            }
+            Some(goal_id.to_string())
+        } else {
+            // Some MCP App Hosts cache the direct presentation schema without
+            // the optional Goal selector. Recover only from the durable,
+            // server-owned Agent->Goal controller relation, and only when it
+            // identifies one active Goal unambiguously. Never choose by
+            // Window, Project, title, or recency.
+            let page = match db.list_goals(
+                &principal,
+                Some(crate::db::GoalLifecycle::Active),
+                0,
+                crate::db::MAX_GOAL_LIST_LIMIT,
+            ) {
+                Ok(page) => page,
+                Err(error) => {
+                    return ToolResult::err_with_output(
+                        error.message(),
+                        serde_json::json!({
+                            "error_kind": error.code(),
+                            "state_changed": false,
+                        }),
+                    )
+                    .with_recovery(RecoveryKind::Reobserve)
+                }
+            };
+            let mut selected = None;
+            let mut ambiguous = page.truncated;
+            for summary in page.goals {
+                let goal = match db.read_goal(&principal, &summary.goal_id) {
+                    Ok(goal) => goal,
+                    Err(error) => {
+                        return ToolResult::err_with_output(
+                            error.message(),
+                            serde_json::json!({
+                                "error_kind": error.code(),
+                                "state_changed": false,
+                            }),
+                        )
+                        .with_recovery(RecoveryKind::Reobserve)
+                    }
+                };
+                if goal.controller_agent_id.as_deref() == Some(agent_id.as_str()) {
+                    if selected.is_some() {
+                        ambiguous = true;
+                        break;
+                    }
+                    selected = Some(summary.goal_id);
+                }
+            }
+            if ambiguous {
+                return ToolResult::err_with_output(
+                    "The active Goal controlled by this Agent is not unique; pass the exact Goal ID",
+                    serde_json::json!({
+                        "error_kind": "goal_controller_ambiguous",
+                        "state_changed": false,
+                    }),
+                )
+                .with_recovery(RecoveryKind::FixInput);
+            }
+            selected
+        };
+
+        let mut result = self.present_agent_continuation(
+            auth,
+            agent_id,
+            endpoint_id,
+            expected_controller_generation,
+        );
+        if result.success {
+            if let Some(output) = result.output.as_object_mut() {
+                output.insert(
+                    "goal_id".to_string(),
+                    goal_id.map_or(serde_json::Value::Null, serde_json::Value::String),
+                );
+            }
+        }
+        result
     }
 
     pub(crate) fn present_agent_continuation(

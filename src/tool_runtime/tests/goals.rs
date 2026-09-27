@@ -217,6 +217,7 @@ fn goal_activity<'a>(result: &'a crate::tool_runtime::ToolResult) -> &'a serde_j
 fn goal_tools_are_control_only_and_never_declare_execution_authority() {
     for name in [
         "create_goal",
+        "start_goal",
         "prepare_goal_workflow",
         "get_goal",
         "present_goal_plan",
@@ -296,7 +297,11 @@ fn goal_tools_are_control_only_and_never_declare_execution_authority() {
         ])
     );
 
-    for name in ["prepare_goal_workflow", "associate_goal_workflow_session"] {
+    for name in [
+        "start_goal",
+        "prepare_goal_workflow",
+        "associate_goal_workflow_session",
+    ] {
         let session_goal = lookup_tool_definition(name).unwrap();
         assert_eq!(session_goal.metadata.effect, ToolEffect::Mutate, "{name}");
         assert_eq!(
@@ -324,6 +329,135 @@ fn goal_tools_are_control_only_and_never_declare_execution_authority() {
             "{name}"
         );
     }
+}
+
+#[tokio::test]
+async fn start_goal_creates_one_session_bound_goal_and_replayable_browser_controller() {
+    let (temp, _db, runtime) = runtime_with_goal_activity_db();
+    let owner = goal_activity_auth("start-goal-owner");
+    let project = register_goal_activity_project(
+        &runtime,
+        "start-goal-runner",
+        "start-goal-owner",
+        "demo",
+        temp.path(),
+    )
+    .await;
+    let session = start_goal_activity_session(&runtime, &owner, &project, "Natural Goal Session");
+    let input = || crate::db::NewGoal {
+        title: "Natural Goal".to_string(),
+        objective: "Continue this Goal while the browser card is mounted.".to_string(),
+        completion_conditions: vec!["Work is verified".to_string()],
+        steps: vec![crate::db::NewGoalStep {
+            id: "verify".to_string(),
+            title: "Verify the work".to_string(),
+        }],
+        controller_agent_id: None,
+        idempotency_key: "natural-goal-stable-key".to_string(),
+    };
+
+    let created = runtime
+        .start_goal(Some(&owner), session.session_id.clone(), input())
+        .await;
+    assert!(created.success, "{:?}", created.output);
+    assert_eq!(created.output["created"], true);
+    assert_eq!(created.output["replayed"], false);
+    let goal_id = created.output["goal_id"].as_str().unwrap();
+    let agent_id = created.output["agent_id"].as_str().unwrap();
+    assert_eq!(created.output["goal"]["controller_agent_id"], agent_id);
+    assert_eq!(created.output["goal"]["summary"]["goal_id"], goal_id);
+    assert_eq!(
+        created.output["goal"]["correlations"][0]["reference_id"],
+        session.session_id
+    );
+    assert_eq!(created.output["agent_continuation"]["agent_id"], agent_id);
+    let next_action = created.output["next_action"].as_str().unwrap();
+    assert!(next_action.contains("Do not stop at Goal creation"));
+    assert!(next_action.contains("present_goal_plan is not a continuation carrier"));
+    assert!(next_action.contains("verify production_auto_resume_available=true"));
+    assert!(next_action.contains("checkpoint verified progress"));
+
+    let continuation = &created.output["agent_continuation"];
+    let presented = runtime.present_agent_continuation_with_goal_selector(
+        Some(&owner),
+        None,
+        Some(agent_id.to_string()),
+        Some(continuation["endpoint_id"].as_str().unwrap().to_string()),
+        Some(continuation["controller_generation"].as_i64().unwrap()),
+        None,
+    );
+    assert!(presented.success, "{:?}", presented.output);
+    assert_eq!(presented.output["goal_id"], goal_id);
+
+    let second_controlled_goal = runtime.create_goal_with_controller(
+        Some(&owner),
+        "Second controlled Goal".to_string(),
+        "Make omission ambiguous for this Agent.".to_string(),
+        Some(agent_id.to_string()),
+        "second-controlled-goal-key".to_string(),
+    );
+    assert!(
+        second_controlled_goal.success,
+        "{:?}",
+        second_controlled_goal.output
+    );
+    let ambiguous = runtime.present_agent_continuation_with_goal_selector(
+        Some(&owner),
+        None,
+        Some(agent_id.to_string()),
+        Some(continuation["endpoint_id"].as_str().unwrap().to_string()),
+        Some(continuation["controller_generation"].as_i64().unwrap()),
+        None,
+    );
+    assert!(!ambiguous.success);
+    assert_eq!(ambiguous.output["error_kind"], "goal_controller_ambiguous");
+    let explicitly_selected = runtime.present_agent_continuation_with_goal_selector(
+        Some(&owner),
+        None,
+        Some(agent_id.to_string()),
+        Some(continuation["endpoint_id"].as_str().unwrap().to_string()),
+        Some(continuation["controller_generation"].as_i64().unwrap()),
+        Some(goal_id.to_string()),
+    );
+    assert!(
+        explicitly_selected.success,
+        "{:?}",
+        explicitly_selected.output
+    );
+    assert_eq!(explicitly_selected.output["goal_id"], goal_id);
+
+    let unrelated = runtime.create_goal_with_controller(
+        Some(&owner),
+        "Unrelated Goal".to_string(),
+        "This Goal is intentionally not controlled by the continuation Agent.".to_string(),
+        None,
+        "unrelated-goal-key".to_string(),
+    );
+    assert!(unrelated.success, "{:?}", unrelated.output);
+    let rejected = runtime.present_agent_continuation_with_goal_selector(
+        Some(&owner),
+        None,
+        Some(agent_id.to_string()),
+        Some(continuation["endpoint_id"].as_str().unwrap().to_string()),
+        Some(continuation["controller_generation"].as_i64().unwrap()),
+        Some(
+            unrelated.output["goal"]["summary"]["goal_id"]
+                .as_str()
+                .unwrap()
+                .to_string(),
+        ),
+    );
+    assert!(!rejected.success);
+    assert_eq!(rejected.output["error_kind"], "goal_controller_mismatch");
+
+    let replay = runtime
+        .start_goal(Some(&owner), session.session_id, input())
+        .await;
+    assert!(replay.success, "{:?}", replay.output);
+    assert_eq!(replay.output["created"], false);
+    assert_eq!(replay.output["replayed"], true);
+    assert_eq!(replay.output["goal_id"], goal_id);
+    assert_eq!(replay.output["agent_id"], agent_id);
 }
 
 #[test]

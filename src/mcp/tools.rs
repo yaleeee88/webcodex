@@ -770,7 +770,8 @@ fn attach_app_visibility(value: &mut Value) {
 fn is_agent_continuation_app_tool_name(tool_name: &str) -> bool {
     matches!(
         tool_name,
-        "agent_continuation_bind"
+        "agent_goal_sync"
+            | "agent_continuation_bind"
             | "agent_continuation_recover_endpoint"
             | "agent_continuation_state"
             | "agent_continuation_wake_acquire"
@@ -2738,7 +2739,8 @@ pub(super) async fn handle_call(
             mcp_runtime_tool_result_fallback(result, result_presentation)
         }
     };
-    if app_only_work_result_state
+    if app_only_goal_plan_sync
+        || app_only_work_result_state
         || app_only_work_result_send_message
         || app_only_changes_file_diff
         || app_only_agent_continuation
@@ -2750,6 +2752,12 @@ pub(super) async fn handle_call(
         // app-only envelope into standard text content as a compatibility path.
         // These tools are ModelHidden/app-visible only, so ordinary model tool
         // results retain the compact text fallback.
+        attach_app_tool_content_fallback(&mut result);
+    }
+    if app_enabled && params.name == "start_goal" {
+        // This model-visible call creates the continuation card. Duplicate its
+        // bounded initial selector so a Host that drops structuredContent can
+        // still initialize the mounted View from standard MCP content.
         attach_app_tool_content_fallback(&mut result);
     }
     if app_enabled && params.name == "present_work_result" {

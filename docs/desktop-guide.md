@@ -42,6 +42,14 @@ Home prioritizes overall readiness, the next action, and your current project. C
 
 You do not need to stop the runtime or OpenAI Secure Tunnel before changing projects. Desktop adds the selected exact project root to the Runner policy, hot-activates it on a compatible Runner, persists the current selection, and keeps the existing Service and Tunnel. Only a legacy or incompatible Runner may need its Desktop-owned Runner process refreshed. Do not broaden allowed directories to work around a project loading failure.
 
+## Create a Goal in natural language
+
+In ChatGPT with WebCodex tunnel selected, say which registered project to use and describe the work. For example: “Create a Goal for my registered chess project: inspect the current state, complete the first implementation phase, checkpoint each milestone, and continue automatically while this browser page stays open until the Goal is complete.”
+
+The model starts a Project Workflow Session and calls `start_goal` to create the Goal and its browser continuation card. You do not need to provide a Session, Goal, or Agent ID. The card shows Goal progress and connection state. The model checkpoints completed milestones and explicitly marks the Goal complete after verification.
+
+“Waiting for browser binding” immediately after creation means the Goal exists but its continuation carrier has not connected yet. Let the current answer finish and keep the ChatGPT page and WebCodex tunnel open. Closing the browser, losing the connection, or a Host scheduling failure pauses automatic continuation while retaining the durable Goal for later recovery.
+
 ## Connections and recovery
 
 Connection keeps **Tunnel connection settings** visible near the top. The ID and write-only API key remain editable with the regular Tunnel running or stopped. Save persists the configuration and replaces only an active Desktop-owned regular Tunnel; Server and Runner keep running. A stopped Tunnel stays stopped until explicitly started. Blank API key retains the saved key. Saved keys are never returned to the UI.
