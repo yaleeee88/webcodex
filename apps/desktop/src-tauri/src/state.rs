@@ -2632,7 +2632,7 @@ fn recover_config_from_backup(
     bytes: &[u8],
     activity: &ActivityLog,
 ) -> DesktopResult<()> {
-    write_atomic_file(primary_path, bytes).map_err(|error| {
+    write_desktop_state_atomically(primary_path, bytes).map_err(|error| {
         desktop_state_unavailable("Desktop could not restore the previous known-good state")
             .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
     })?;
@@ -2707,7 +2707,7 @@ fn save_config_atomically_with_backup_policy(
         }
     }
 
-    write_atomic_file(path, encoded).map_err(|error| {
+    write_desktop_state_atomically(path, encoded).map_err(|error| {
         desktop_state_unavailable("Desktop could not persist its non-secret runtime state")
             .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
     })
@@ -2749,10 +2749,26 @@ pub(crate) fn write_atomic_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     write_atomic_file_with_hook(path, bytes, |_| Ok(()))
 }
 
+fn write_desktop_state_atomically(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_file_with_hook_and_efs_fallback(path, bytes, |_| Ok(()), true)
+}
+
 pub(crate) fn write_atomic_file_with_hook<F>(
     path: &Path,
     bytes: &[u8],
     before_replace: F,
+) -> io::Result<()>
+where
+    F: FnOnce(&Path) -> io::Result<()>,
+{
+    write_atomic_file_with_hook_and_efs_fallback(path, bytes, before_replace, false)
+}
+
+fn write_atomic_file_with_hook_and_efs_fallback<F>(
+    path: &Path,
+    bytes: &[u8],
+    before_replace: F,
+    allow_efs_mismatch_fallback: bool,
 ) -> io::Result<()>
 where
     F: FnOnce(&Path) -> io::Result<()>,
@@ -2776,6 +2792,19 @@ where
         file.sync_all()?;
         drop(file);
         before_replace(&temp_path)?;
+        #[cfg(windows)]
+        {
+            if allow_efs_mismatch_fallback && has_efs_encryption_mismatch(&temp_path, path)? {
+                // Keep the existing file's EFS attributes and update the primary in place.
+                // save_config_atomically preserves a known-good backup before reaching here.
+                write_existing_file_in_place(path, bytes)?;
+                let _ = std::fs::remove_file(&temp_path);
+                sync_state_directory(parent)?;
+                return Ok(());
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = allow_efs_mismatch_fallback;
         atomic_replace(&temp_path, path)?;
         sync_state_directory(parent)?;
         Ok(())
@@ -2786,6 +2815,28 @@ where
     result
 }
 
+#[cfg(windows)]
+fn has_efs_encryption_mismatch(source: &Path, destination: &Path) -> io::Result<bool> {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_ENCRYPTED: u32 = 0x4000;
+    let destination = match std::fs::metadata(destination) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error),
+    };
+    let source = std::fs::metadata(source)?;
+    Ok((source.file_attributes() & FILE_ATTRIBUTE_ENCRYPTED)
+        != (destination.file_attributes() & FILE_ATTRIBUTE_ENCRYPTED))
+}
+
+fn write_existing_file_in_place(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new().write(true).truncate(true).open(path)?;
+    file.write_all(bytes)?;
+    file.flush()?;
+    file.sync_all()
+}
+
 #[cfg(not(windows))]
 fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
     std::fs::rename(source, destination)
@@ -2794,46 +2845,16 @@ fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
 #[cfg(windows)]
 fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
-    use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        DecryptFileW, EncryptFileW, MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING,
-        MOVEFILE_WRITE_THROUGH,
+        MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
     };
 
-    const FILE_ATTRIBUTE_ENCRYPTED: u32 = 0x4000;
-
-    // New siblings inherit an encrypted AppData directory's EFS setting, while
-    // older Desktop state files may have different encryption attributes.
+    // ReplaceFileW preserves the destination's mergeable metadata on Windows.
     let destination_exists = match std::fs::symlink_metadata(destination) {
         Ok(_) => true,
         Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(error),
     };
-    if destination_exists {
-        let source_metadata = std::fs::metadata(source)?;
-        let destination_metadata = std::fs::metadata(destination)?;
-        let source_encrypted =
-            source_metadata.file_attributes() & FILE_ATTRIBUTE_ENCRYPTED != 0;
-        let destination_encrypted =
-            destination_metadata.file_attributes() & FILE_ATTRIBUTE_ENCRYPTED != 0;
-        if source_encrypted != destination_encrypted {
-            let source_wide = source
-                .as_os_str()
-                .encode_wide()
-                .chain(std::iter::once(0))
-                .collect::<Vec<_>>();
-            let aligned = unsafe {
-                if destination_encrypted {
-                    EncryptFileW(source_wide.as_ptr())
-                } else {
-                    DecryptFileW(source_wide.as_ptr(), 0)
-                }
-            };
-            if aligned == 0 {
-                return Err(io::Error::last_os_error());
-            }
-        }
-    }
     let source = source
         .as_os_str()
         .encode_wide()
@@ -3664,6 +3685,19 @@ mod tests {
             StoredConfigFile::Valid { config, .. } => assert_eq!(config, previous),
             other => panic!("previous state was not preserved: {other:?}"),
         }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn in_place_state_write_replaces_existing_contents() {
+        let dir = unique_state_dir("in-place-state-write");
+        std::fs::create_dir_all(&dir).expect("create state fixture dir");
+        let path = dir.join("desktop-state.json");
+        std::fs::write(&path, b"previous state").expect("write previous state");
+
+        write_existing_file_in_place(&path, b"updated state").expect("update existing state");
+
+        assert_eq!(std::fs::read(&path).expect("read updated state"), b"updated state");
         let _ = std::fs::remove_dir_all(dir);
     }
 
