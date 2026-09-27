@@ -2673,6 +2673,20 @@ fn read_stored_config(path: &Path) -> DesktopResult<StoredConfigFile> {
 }
 
 fn save_config_atomically(path: &Path, encoded: &[u8]) -> DesktopResult<()> {
+    let backup_path = desktop_state_backup_path(path);
+    let skip_backup_refresh = config_backup_is_efs_encrypted(&backup_path)
+        && matches!(
+            read_stored_config(&backup_path),
+            Ok(StoredConfigFile::Valid { .. })
+        );
+    save_config_atomically_with_backup_policy(path, encoded, skip_backup_refresh)
+}
+
+fn save_config_atomically_with_backup_policy(
+    path: &Path,
+    encoded: &[u8],
+    skip_backup_refresh: bool,
+) -> DesktopResult<()> {
     if encoded.len() as u64 > DESKTOP_STATE_MAX_BYTES {
         return Err(DesktopError::new(
             "desktop_state_invalid",
@@ -2683,16 +2697,35 @@ fn save_config_atomically(path: &Path, encoded: &[u8]) -> DesktopResult<()> {
 
     if let StoredConfigFile::Valid { bytes, .. } = read_stored_config(path)? {
         let backup = desktop_state_backup_path(path);
-        write_atomic_file(&backup, &bytes).map_err(|error| {
-            desktop_state_unavailable("Desktop could not preserve the previous known-good state")
+        if !skip_backup_refresh {
+            write_atomic_file(&backup, &bytes).map_err(|error| {
+                desktop_state_unavailable(
+                    "Desktop could not preserve the previous known-good state",
+                )
                 .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
-        })?;
+            })?;
+        }
     }
 
     write_atomic_file(path, encoded).map_err(|error| {
         desktop_state_unavailable("Desktop could not persist its non-secret runtime state")
             .with_details(serde_json::json!({ "io_kind": format!("{:?}", error.kind()) }))
     })
+}
+
+#[cfg(windows)]
+fn config_backup_is_efs_encrypted(path: &Path) -> bool {
+    use std::os::windows::fs::MetadataExt;
+
+    const FILE_ATTRIBUTE_ENCRYPTED: u32 = 0x4000;
+    std::fs::metadata(path)
+        .map(|metadata| metadata.file_attributes() & FILE_ATTRIBUTE_ENCRYPTED != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn config_backup_is_efs_encrypted(_path: &Path) -> bool {
+    false
 }
 
 fn desktop_state_backup_path(path: &Path) -> PathBuf {
@@ -3626,6 +3659,33 @@ mod tests {
         match read_stored_config(&desktop_state_backup_path(&path)).expect("read backup") {
             StoredConfigFile::Valid { config, .. } => assert_eq!(config, previous),
             other => panic!("previous snapshot was not valid: {other:?}"),
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn atomic_save_keeps_efs_backup_and_updates_primary() {
+        let dir = unique_state_dir("efs-known-good-backup");
+        std::fs::create_dir_all(&dir).expect("create state fixture dir");
+        let path = dir.join("desktop-state.json");
+        let backup_path = desktop_state_backup_path(&path);
+        let previous = test_stored_config("previous");
+        let replacement = test_stored_config("replacement");
+        let previous_bytes = serde_json::to_vec_pretty(&previous).unwrap();
+        let replacement_bytes = serde_json::to_vec_pretty(&replacement).unwrap();
+        write_atomic_file(&path, &previous_bytes).expect("write previous state");
+        write_atomic_file(&backup_path, &previous_bytes).expect("write previous backup");
+
+        save_config_atomically_with_backup_policy(&path, &replacement_bytes, true)
+            .expect("an encrypted known-good backup must not block saving the primary");
+
+        match read_stored_config(&path).expect("read updated primary") {
+            StoredConfigFile::Valid { config, .. } => assert_eq!(config, replacement),
+            other => panic!("replacement state was not valid: {other:?}"),
+        }
+        match read_stored_config(&backup_path).expect("read retained backup") {
+            StoredConfigFile::Valid { config, .. } => assert_eq!(config, previous),
+            other => panic!("previous known-good backup was not retained: {other:?}"),
         }
         let _ = std::fs::remove_dir_all(dir);
     }
