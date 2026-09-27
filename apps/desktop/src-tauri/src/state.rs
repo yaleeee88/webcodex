@@ -2830,6 +2830,7 @@ fn has_efs_encryption_mismatch(source: &Path, destination: &Path) -> io::Result<
         != (destination.file_attributes() & FILE_ATTRIBUTE_ENCRYPTED))
 }
 
+#[cfg(windows)]
 fn write_existing_file_in_place(path: &Path, bytes: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new().write(true).truncate(true).open(path)?;
     file.write_all(bytes)?;
@@ -3689,6 +3690,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(windows)]
     fn in_place_state_write_replaces_existing_contents() {
         let dir = unique_state_dir("in-place-state-write");
         std::fs::create_dir_all(&dir).expect("create state fixture dir");
