@@ -2794,19 +2794,46 @@ fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
 #[cfg(windows)]
 fn atomic_replace(source: &Path, destination: &Path) -> io::Result<()> {
     use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::fs::MetadataExt;
     use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        DecryptFileW, EncryptFileW, MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING,
+        MOVEFILE_WRITE_THROUGH,
     };
 
-    // ReplaceFile preserves the replaced file's ACL and EFS attributes. This
-    // matters for Desktop state under an encrypted AppData directory: MoveFileEx
-    // can reject replacement of the existing encrypted backup even though the
-    // temporary sibling was written successfully.
+    const FILE_ATTRIBUTE_ENCRYPTED: u32 = 0x4000;
+
+    // New siblings inherit an encrypted AppData directory's EFS setting, while
+    // older Desktop state files may have different encryption attributes.
     let destination_exists = match std::fs::symlink_metadata(destination) {
         Ok(_) => true,
         Err(error) if error.kind() == io::ErrorKind::NotFound => false,
         Err(error) => return Err(error),
     };
+    if destination_exists {
+        let source_metadata = std::fs::metadata(source)?;
+        let destination_metadata = std::fs::metadata(destination)?;
+        let source_encrypted =
+            source_metadata.file_attributes() & FILE_ATTRIBUTE_ENCRYPTED != 0;
+        let destination_encrypted =
+            destination_metadata.file_attributes() & FILE_ATTRIBUTE_ENCRYPTED != 0;
+        if source_encrypted != destination_encrypted {
+            let source_wide = source
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect::<Vec<_>>();
+            let aligned = unsafe {
+                if destination_encrypted {
+                    EncryptFileW(source_wide.as_ptr())
+                } else {
+                    DecryptFileW(source_wide.as_ptr(), 0)
+                }
+            };
+            if aligned == 0 {
+                return Err(io::Error::last_os_error());
+            }
+        }
+    }
     let source = source
         .as_os_str()
         .encode_wide()
