@@ -2416,7 +2416,7 @@ async fn mcp_tools_list_stateless_serialized_size_budget() {
                 };
                 // Work Result v3 adds one bounded App-only collaboration adapter
                 // alongside the existing Goal Plan/continuation/read helpers.
-                let count_budget = max_tools + if app_enabled { 17 } else { 0 } + feature_tools;
+                let count_budget = max_tools + if app_enabled { 18 } else { 0 } + feature_tools;
                 let byte_budget =
                     max_bytes + if app_enabled { 19_000 } else { 0 } + feature_tools * 4096;
                 if feature_tools == 0 {
