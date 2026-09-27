@@ -2517,29 +2517,9 @@ fn project_snapshot(config: &StoredDesktopConfig) -> Option<ProjectSelection> {
 
 fn stored_runner_client_id(config: &StoredDesktopConfig) -> Option<String> {
     let runtime = config.runtime.as_ref()?;
-    if let Some(client_id) = runtime
-        .runner_client_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|client_id| !client_id.is_empty())
-    {
-        return Some(client_id.to_string());
-    }
-    // Pre-migration Desktop state did not persist client_id separately. Recover
-    // it from the exact runtime Project identity instead of accepting whatever
-    // client_id happens to be present in runner.toml during the first upgrade.
-    let project_id = runtime.project_id.as_deref()?.trim();
-    let runtime_project_id = runtime.runtime_project_id.as_deref()?.trim();
-    if project_id.is_empty() || runtime_project_id.is_empty() {
-        return None;
-    }
-    let suffix = format!(":{project_id}");
-    runtime_project_id
-        .strip_prefix("agent:")?
-        .strip_suffix(&suffix)
-        .map(str::trim)
-        .filter(|client_id| !client_id.is_empty())
-        .map(str::to_string)
+    // Pre-migration Desktop state did not persist client_id separately. Never
+    // substitute whatever identity happens to be present in runner.toml.
+    runtime.resolved_runner_client_id()
 }
 
 fn runner_identity_from_config(config: &StoredDesktopConfig) -> Option<RunnerRuntimeIdentity> {

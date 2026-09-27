@@ -529,6 +529,34 @@ pub struct StoredRuntime {
     pub runtime_project_id: Option<String>,
 }
 
+impl StoredRuntime {
+    /// Resolve the Runner identity saved by current Desktop versions, or safely
+    /// recover it from the exact persisted Runtime Project identity used before
+    /// `runner_client_id` was stored separately.
+    pub fn resolved_runner_client_id(&self) -> Option<String> {
+        if let Some(client_id) = self
+            .runner_client_id
+            .as_deref()
+            .map(str::trim)
+            .filter(|client_id| !client_id.is_empty())
+        {
+            return Some(client_id.to_string());
+        }
+        let project_id = self.project_id.as_deref()?.trim();
+        let runtime_project_id = self.runtime_project_id.as_deref()?.trim();
+        if project_id.is_empty() || runtime_project_id.is_empty() {
+            return None;
+        }
+        let suffix = format!(":{project_id}");
+        runtime_project_id
+            .strip_prefix("agent:")?
+            .strip_suffix(&suffix)
+            .map(str::trim)
+            .filter(|client_id| !client_id.is_empty())
+            .map(str::to_string)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

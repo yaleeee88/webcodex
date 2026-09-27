@@ -153,13 +153,11 @@ pub fn forget(config: &mut StoredDesktopConfig, project: &str, path: &str) {
 /// A bounded, complete observation of this exact Runner is the only negative
 /// evidence allowed to retire saved registration history.
 fn complete_inventory<'a>(runtime: &StoredRuntime, overview: &'a Value) -> Option<&'a Vec<Value>> {
-    let Some(client_id) = runtime.runner_client_id.as_deref() else {
-        return None;
-    };
+    let client_id = runtime.resolved_runner_client_id()?;
     let Some(rows) = overview.get("projects").and_then(Value::as_array) else {
         return None;
     };
-    if overview.get("client_id").and_then(Value::as_str) != Some(client_id)
+    if overview.get("client_id").and_then(Value::as_str) != Some(client_id.as_str())
         || overview.get("connected").and_then(Value::as_bool) != Some(true)
         || overview.get("projects_available").and_then(Value::as_bool) != Some(true)
         || overview.get("projects_truncated").and_then(Value::as_bool) != Some(false)

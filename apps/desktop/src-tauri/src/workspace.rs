@@ -109,10 +109,9 @@ fn request_body(request: WorkspaceRequest, runner: &str) -> DesktopResult<(&'sta
 
 pub async fn query(runtime: &StoredRuntime, request: WorkspaceRequest) -> DesktopResult<Value> {
     let runner = runtime
-        .runner_client_id
-        .as_deref()
+        .resolved_runner_client_id()
         .ok_or_else(unavailable)?;
-    let (route, body) = request_body(request, runner)?;
+    let (route, body) = request_body(request, &runner)?;
     post(
         runtime,
         &format!("/api/runtime-console/{route}"),
