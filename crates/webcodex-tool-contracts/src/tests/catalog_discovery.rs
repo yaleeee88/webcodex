@@ -888,7 +888,10 @@ fn coding_intent_has_independent_ordered_canonical_selection_surface() {
         "checkpoint_goal",
         "update_goal",
     ] {
-        assert!(goal.tools.contains(&required), "Goal intent omitted {required}");
+        assert!(
+            goal.tools.contains(&required),
+            "Goal intent omitted {required}"
+        );
     }
 
     let mut seen = BTreeSet::new();
